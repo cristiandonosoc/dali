@@ -1,0 +1,17 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "lib",
+    hdrs = glob(["include/SDL3/*.h"]),
+    includes = ["include"],
+    visibility = ["//third_party:__pkg__"],
+    deps = [":import"],
+)
+
+cc_import(
+    name = "import",
+    interface_library = "lib/x64/SDL3.lib",
+    shared_library = "lib/x64/SDL3.dll",
+    visibility = ["//visibility:private"],
+)

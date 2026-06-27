@@ -1,0 +1,21 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "lib",
+    hdrs = glob([
+        "include/assimp/**/*.h",
+        "include/assimp/importer.hpp",
+        "include/assimp/**/*.inl",
+    ]),
+    includes = ["include"],
+    visibility = ["//third_party:__pkg__"],
+    deps = [":import"],
+)
+
+cc_import(
+    name = "import",
+    interface_library = "lib/assimp.lib",
+    shared_library = "bin/assimp.dll",
+    visibility = ["//visibility:private"],
+)

@@ -1,0 +1,14 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "b64",
+    srcs = glob([
+        "decode.c",
+        "encode.c",
+        "buffer.c",
+    ]),
+    hdrs = ["b64.h"],
+    copts = ["/std:c11"],
+    includes = ["."],
+    visibility = ["//third_party:__pkg__"],
+)

@@ -1,0 +1,18 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "stb",
+    srcs = [
+        "stb_image.cpp",
+        "stb_image_write.cpp",
+        "stb_sprintf.cpp",
+        "stb_truetype.cpp",
+    ],
+    hdrs = [
+        "stb_image.h",
+        "stb_image_write.h",
+        "stb_sprintf.h",
+        "stb_truetype.h",
+    ],
+    visibility = ["//third_party:__pkg__"],
+)

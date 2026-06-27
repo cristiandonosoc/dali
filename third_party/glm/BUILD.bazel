@@ -1,0 +1,11 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "glm",
+    hdrs = glob([
+        "simd/platform.h",
+        "**/*.hpp",
+        "**/*.inl",
+    ]),
+    visibility = ["//third_party:__pkg__"],
+)

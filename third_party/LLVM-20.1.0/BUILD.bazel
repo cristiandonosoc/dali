@@ -1,0 +1,20 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "lib",
+    hdrs = glob([
+        "include/clang-c/*.h",
+        "include/llvm-c/*.h",
+    ]),
+    includes = ["include"],
+    visibility = ["//third_party:__pkg__"],
+    deps = [":import"],
+)
+
+cc_import(
+    name = "import",
+    interface_library = "lib/libclang.lib",
+    shared_library = "bin/libclang.dll",
+    visibility = ["//visibility:private"],
+)

@@ -1,0 +1,39 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "lib",
+    srcs = glob(["*.cpp"]),
+    hdrs = glob(["*.h"]),
+    includes = ["."],
+    visibility = ["//third_party:__pkg__"],
+)
+
+cc_library(
+    name = "sdl3_backend",
+    srcs = ["backends/imgui_impl_sdl3.cpp"],
+    hdrs = ["backends/imgui_impl_sdl3.h"],
+    includes = [
+        ".",
+        "backends",
+    ],
+    visibility = ["//third_party:__pkg__"],
+    deps = [
+        ":lib",
+        "//third_party:sdl3",
+    ],
+)
+
+cc_library(
+    name = "opengl3_backend",
+    srcs = ["backends/imgui_impl_opengl3.cpp"],
+    hdrs = [
+        "backends/imgui_impl_opengl3.h",
+        "backends/imgui_impl_opengl3_loader.h",
+    ],
+    includes = [
+        ".",
+        "backends",
+    ],
+    visibility = ["//third_party:__pkg__"],
+    deps = [":lib"],
+)
