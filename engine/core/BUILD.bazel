@@ -1,0 +1,25 @@
+# load("//kandinsky:cc_rules.bzl", "kdk_cc_library", "kdk_cc_test")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "core",
+    srcs = [
+        "defines.cpp",
+        "memory.cpp",
+        "string.cpp",
+    ],
+    hdrs = [
+        "algorithm.h",
+        "container.h",
+        "defines.h",
+        "function.h",
+        "memory.h",
+        "string.h",
+    ],
+    linkopts = ["-DEFAULTLIB:Dbghelp.lib"],
+    deps = [
+        "//third_party:cwalk",
+        "//third_party:sdl3",
+        "//third_party:stb",
+    ],
+)

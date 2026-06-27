@@ -1,0 +1,14 @@
+### BUILD
+
+build --cxxopt="/std:c++20"
+build --cxxopt="/FC"
+build --linkopt="/debug"
+build --compilation_mode=dbg
+build --strip=never
+
+### TEST
+
+test --test_output=errors
+# Make Bazel not complain about sharding.
+test --test_env=GTEST_SHARD_STATUS_FILE=
+test --experimental_ui_max_stdouterr_bytes=2000000
