@@ -19,7 +19,7 @@
 
 namespace kdk {
 
-const char* String::kEmptyStrPtr = "";
+const char* StringView::kEmptyStrPtr = "";
 
 namespace string_private {
 
@@ -35,7 +35,7 @@ inline bool StrCmpWithLength(const char* s1, const char* s2, u64 size) {
 
 }  // namespace string_private
 
-bool String::Equals(const char* str) const {
+bool StringView::Equals(const char* str) const {
     if (!IsValid()) {
         return false;
     }
@@ -56,7 +56,7 @@ bool String::Equals(const char* str) const {
     return string_private::StrCmpWithLength(_Str, str, Size);
 }
 
-bool String::Equals(const String& other) const {
+bool StringView::Equals(const StringView& other) const {
     if (Size != other.Size) {
         return false;
     }
@@ -69,7 +69,7 @@ bool String::Equals(const String& other) const {
     return string_private::StrCmpWithLength(_Str, other._Str, Size);
 }
 
-String InternStringToArena(Arena* arena, const char* string, u64 length) {
+StringView InternStringToArena(Arena* arena, const char* string, u64 length) {
     if (length == 0) {
         length = std::strlen(string);
     }
@@ -77,14 +77,14 @@ String InternStringToArena(Arena* arena, const char* string, u64 length) {
     auto dst = ArenaPush(arena, length + 1);
     std::memcpy(dst.data(), string, length);
     dst[length] = 0;  // The null terminator.
-    return String((char*)dst.data(), length);
+    return StringView((char*)dst.data(), length);
 }
 
-String InternStringToArena(Arena* arena, String string) {
+StringView InternStringToArena(Arena* arena, StringView string) {
     return InternStringToArena(arena, string.Str(), string.Size);
 }
 
-String Concat(Arena* arena, String a, String b) {
+StringView Concat(Arena* arena, StringView a, StringView b) {
     if (a.IsEmpty()) {
         return b;
     }
@@ -105,10 +105,10 @@ String Concat(Arena* arena, String a, String b) {
 
     i64 strlen = buffer_size - 1;
     ASSERT(ptr - buffer == strlen);
-    return String(buffer, strlen);
+    return StringView(buffer, strlen);
 }
 
-String RemovePrefix(Arena* arena, String path, String prefix) {
+StringView RemovePrefix(Arena* arena, StringView path, StringView prefix) {
     if (path.IsEmpty() || prefix.IsEmpty()) {
         return path;
     }
@@ -147,7 +147,7 @@ String RemovePrefix(Arena* arena, String path, String prefix) {
 
 // Printf ------------------------------------------------------------------------------------------
 
-String Printf(Arena* arena, const char* fmt, ...) {
+StringView Printf(Arena* arena, const char* fmt, ...) {
     int size = 4 * STB_SPRINTF_MIN;
     auto data = ArenaPush(arena, size);
     char* buf = (char*)data.data();
@@ -156,10 +156,10 @@ String Printf(Arena* arena, const char* fmt, ...) {
     int len = stbsp_vsnprintf(buf, size, fmt, va);
     va_end(va);
 
-    return String(buf, len);
+    return StringView(buf, len);
 }
 
-String ToString(Arena* arena, const std::source_location& location) {
+StringView ToString(Arena* arena, const std::source_location& location) {
     return Printf(arena,
                   "%s:%d (%s)",
                   location.file_name(),
@@ -233,11 +233,11 @@ void PrintBacktrace(Arena* arena, u32 frames_to_skip) {
         }
 
         // Get the file and line info.
-        String file("<unknown>"sv);
+        StringView file("<unknown>"sv);
         u32 line_number = 0;
         DWORD displacement = 0;
         if (SymGetLineFromAddr64(handle, addr, &displacement, &line)) {
-            file = String(line.FileName);
+            file = StringView(line.FileName);
             line_number = (u32)line.LineNumber;
 
             file = paths::CleanPathFromBazel(file);
@@ -257,7 +257,7 @@ namespace paths {
 
 namespace paths_private {
 
-String gInitialDirectory = {};
+StringView gInitialDirectory = {};
 
 }  // namespace paths_private
 
@@ -269,21 +269,21 @@ bool IsAbsolute(const char* path) {
     return cwk_path_is_absolute(path);
 }
 
-String GetBaseDir(Arena* arena) {
+StringView GetBaseDir(Arena* arena) {
     using namespace paths_private;
 
     if (gInitialDirectory.IsEmpty()) {
-        if (String ws = GetEnv(arena, "BUILD_WORKSPACE_DIRECTORY"); !ws.IsEmpty()) {
+        if (StringView ws = GetEnv(arena, "BUILD_WORKSPACE_DIRECTORY"); !ws.IsEmpty()) {
             gInitialDirectory = ws;
         } else {
-            gInitialDirectory = String(SDL_GetCurrentDirectory());
+            gInitialDirectory = StringView(SDL_GetCurrentDirectory());
         }
     }
 
     return gInitialDirectory;
 }
 
-String GetDirname(Arena* arena, String path) {
+StringView GetDirname(Arena* arena, StringView path) {
     if (path.IsEmpty()) {
         return {};
     }
@@ -296,7 +296,7 @@ String GetDirname(Arena* arena, String path) {
     return InternStringToArena(arena, path.Str(), size);
 }
 
-String GetBasename(Arena* arena, String path) {
+StringView GetBasename(Arena* arena, StringView path) {
     if (path.IsEmpty()) {
         return {};
     }
@@ -310,7 +310,7 @@ String GetBasename(Arena* arena, String path) {
     return InternStringToArena(arena, out, size);
 }
 
-String GetExtension(Arena* arena, String path) {
+StringView GetExtension(Arena* arena, StringView path) {
     if (path.IsEmpty()) {
         return {};
     }
@@ -324,9 +324,9 @@ String GetExtension(Arena* arena, String path) {
     return InternStringToArena(arena, extension, size);
 }
 
-String RemoveExtension(Arena* arena, String path) {
+StringView RemoveExtension(Arena* arena, StringView path) {
     auto scratch = GetScratchArena(arena);
-    String extension = GetExtension(scratch, path);
+    StringView extension = GetExtension(scratch, path);
     if (extension.IsEmpty()) {
         return path;
     }
@@ -336,11 +336,11 @@ String RemoveExtension(Arena* arena, String path) {
         return path;
     }
 
-    String result = String(path.Str(), path.Size - extension.Size);
+    StringView result = StringView(path.Str(), path.Size - extension.Size);
     return InternStringToArena(arena, result);
 }
 
-String ChangeExtension(Arena* arena, String original, String new_ext) {
+StringView ChangeExtension(Arena* arena, StringView original, StringView new_ext) {
     if (new_ext.IsEmpty()) {
         return original;
     }
@@ -348,11 +348,11 @@ String ChangeExtension(Arena* arena, String original, String new_ext) {
     ASSERT(new_ext.Str()[0] == '.');
     auto scratch = GetScratchArena(arena);
 
-    String clean = RemoveExtension(scratch, original);
+    StringView clean = RemoveExtension(scratch, original);
     return Concat(arena, clean, new_ext);
 }
 
-String PathJoin(Arena* arena, String a, String b) {
+StringView PathJoin(Arena* arena, StringView a, StringView b) {
     if (a.IsEmpty()) {
         return b;
     }
@@ -369,7 +369,7 @@ String PathJoin(Arena* arena, String a, String b) {
         return {};
     }
 
-    return String(buffer, size);
+    return StringView(buffer, size);
 }
 
 namespace string_private {
@@ -389,7 +389,7 @@ SDL_EnumerationResult EnumerateDirectoryCallback(void* userdata,
 
     ASSERTF(data->EntryCount < kMaxFilesInDirectory, "Time to up this limit :)");
 
-    String file = PathJoin(data->ResultArena, String(dirname), String(fname));
+    StringView file = PathJoin(data->ResultArena, StringView(dirname), StringView(fname));
 
     SDL_PathInfo info = {};
     if (!SDL_GetPathInfo(file.Str(), &info)) {
@@ -406,7 +406,7 @@ SDL_EnumerationResult EnumerateDirectoryCallback(void* userdata,
 
 }  // namespace string_private
 
-std::span<DirEntry> ListDir(Arena* arena, String path) {
+std::span<DirEntry> ListDir(Arena* arena, StringView path) {
     using namespace string_private;
 
     EnumerateDirectoryCallbackData data{
@@ -422,11 +422,11 @@ std::span<DirEntry> ListDir(Arena* arena, String path) {
     return {data.Entries, data.EntryCount};
 }
 
-String CleanPathFromBazel(String path) {
+StringView CleanPathFromBazel(StringView path) {
     // Remove bazel nonesense.
     const char* bazel_marker = "_main\\";
     if (const char* marker_pos = strstr(path.Str(), bazel_marker)) {
-        path = String(marker_pos + strlen(bazel_marker));
+        path = StringView(marker_pos + strlen(bazel_marker));
     }
     return path;
 }
@@ -435,7 +435,7 @@ String CleanPathFromBazel(String path) {
 
 // System ------------------------------------------------------------------------------------------
 
-String GetEnv(Arena* arena, const char* env) {
+StringView GetEnv(Arena* arena, const char* env) {
     char* buf = (char*)ArenaPushZero(arena, 1024).data();
     size_t required_size;
     errno_t err = getenv_s(&required_size, buf, 1024, env);
@@ -443,7 +443,7 @@ String GetEnv(Arena* arena, const char* env) {
         return {};
     }
 
-    return String(buf);
+    return StringView(buf);
 }
 
 }  // namespace kdk

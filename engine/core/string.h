@@ -19,7 +19,7 @@ namespace kdk {
 
 struct Arena;
 
-struct String {
+struct StringView {
     static const char* kEmptyStrPtr;
 
     // You should not get this pointer directly if you want to use it for printing, since it might
@@ -29,11 +29,11 @@ struct String {
 
     // By default we create the empty value rather than null.
     // Easier for comparisons.
-    String() : _Str(kEmptyStrPtr), Size(0) {}
-    constexpr String(std::string_view sv) : _Str(sv.data()), Size(sv.size()) {}
-    explicit String(const char* str) : _Str(str), Size(std::strlen(str)) {}
-    constexpr explicit String(const char* str, u64 size) : _Str(str), Size(size) {}
-    constexpr explicit String(std::span<u8> data)
+    StringView() : _Str(kEmptyStrPtr), Size(0) {}
+    constexpr StringView(std::string_view sv) : _Str(sv.data()), Size(sv.size()) {}
+    explicit StringView(const char* str) : _Str(str), Size(std::strlen(str)) {}
+    constexpr explicit StringView(const char* str, u64 size) : _Str(str), Size(size) {}
+    constexpr explicit StringView(std::span<u8> data)
         : _Str((const char*)data.data()), Size(data.size_bytes()) {}
 
     const char* Str() const { return _Str ? _Str : kEmptyStrPtr; }
@@ -44,9 +44,9 @@ struct String {
     bool IsValid() const { return _Str != nullptr; }
 
     bool Equals(const char* str) const;
-    bool Equals(const String& other) const;
+    bool Equals(const StringView& other) const;
 
-    bool operator==(const String& other) const { return Equals(other); }
+    bool operator==(const StringView& other) const { return Equals(other); }
 
     // Subscript operator
     const char& operator[](u64 index) const {
@@ -66,13 +66,13 @@ struct FixedString {
     Array<char, CAPACITY> _Chars;
     u32 Size = 0;
 
-    FixedString() { Set(String()); }  // Default to empty string.
+    FixedString() { Set(StringView()); }  // Default to empty string.
     FixedString(const char* str) { Set(str); }
-    FixedString(std::string_view sv) { Set(String(sv)); }
-    FixedString(String string) { Set(string); }
+    FixedString(std::string_view sv) { Set(StringView(sv)); }
+    FixedString(StringView string) { Set(string); }
 
-    void Set(const char* str, bool trap_truncation = false) { Set(String(str), trap_truncation); }
-    void Set(String string, bool trap_truncation = false) {
+    void Set(const char* str, bool trap_truncation = false) { Set(StringView(str), trap_truncation); }
+    void Set(StringView string, bool trap_truncation = false) {
         Size = (u32)string.Size;
         if (Size >= CAPACITY) {
             if (trap_truncation) {
@@ -84,22 +84,22 @@ struct FixedString {
         _Chars[Size] = '\0';
     }
 
-    String ToString() const { return String(_Chars.DataPtr(), Size); }
+    StringView ToString() const { return StringView(_Chars.DataPtr(), Size); }
     const char* Str() const { return &_Chars[0]; }
     char* StrMutable() { return &_Chars[0]; }
 
     bool IsEmpty() const { return Size == 0; }
 
     bool operator==(const FixedString<CAPACITY>& other) const { return Equals(other.ToString()); }
-    bool Equals(const String& other) const {
-        String _this = ToString();
+    bool Equals(const StringView& other) const {
+        StringView _this = ToString();
         return _this.Equals(other);
     }
 
     template <u64 OTHER_CAPACITY>
     bool operator<(const FixedString<OTHER_CAPACITY>& other) const {
-        String this_str = ToString();
-        String other_str = other.ToString();
+        StringView this_str = ToString();
+        StringView other_str = other.ToString();
         return std::strcmp(this_str.Str(), other_str.Str()) < 0;
     }
 };
@@ -127,20 +127,20 @@ constexpr uint32_t operator"" _hash(const char* str, size_t) { return CompileHas
 
 // Returns hash + 1 so we can use 0 as none;
 inline i32 IDFromString(const char* string) { return HashString(string) + 1; }
-inline i32 IDFromString(const String& string) { return IDFromString(string.Str()); }
+inline i32 IDFromString(const StringView& string) { return IDFromString(string.Str()); }
 
 // |length| MUST NOT include the zero terminator.
-String InternStringToArena(Arena* arena, const char* string, u64 length = 0);
-String InternStringToArena(Arena* arena, String string);
+StringView InternStringToArena(Arena* arena, const char* string, u64 length = 0);
+StringView InternStringToArena(Arena* arena, StringView string);
 
-String Concat(Arena* arena, String a, String b);
+StringView Concat(Arena* arena, StringView a, StringView b);
 
-String RemovePrefix(Arena* arena, String path, String prefix);
+StringView RemovePrefix(Arena* arena, StringView path, StringView prefix);
 
 // Printf ------------------------------------------------------------------------------------------
 
-String Printf(Arena* arena, const char* fmt, ...);
-String ToString(Arena* arena, const std::source_location& location);
+StringView Printf(Arena* arena, const char* fmt, ...);
+StringView ToString(Arena* arena, const std::source_location& location);
 
 void PrintBacktrace(Arena* arena, u32 frames_to_skip = 0);
 
@@ -149,46 +149,46 @@ void PrintBacktrace(Arena* arena, u32 frames_to_skip = 0);
 namespace paths {
 
 bool IsAbsolute(const char* path);
-inline bool IsAbsolute(const String& path) { return IsAbsolute(path.Str()); }
+inline bool IsAbsolute(const StringView& path) { return IsAbsolute(path.Str()); }
 
 // The directory this program was run from.
-String GetBaseDir(Arena* arena);
+StringView GetBaseDir(Arena* arena);
 
-String GetDirname(Arena* arena, String path);
-String GetBasename(Arena* arena, String path);
-String GetExtension(Arena* arena, String path);
-String RemoveExtension(Arena* arena, String path);
-String ChangeExtension(Arena* arena, String original, String new_ext);
+StringView GetDirname(Arena* arena, StringView path);
+StringView GetBasename(Arena* arena, StringView path);
+StringView GetExtension(Arena* arena, StringView path);
+StringView RemoveExtension(Arena* arena, StringView path);
+StringView ChangeExtension(Arena* arena, StringView original, StringView new_ext);
 
-inline String PathJoin(Arena*, String a) { return a; }  // Base case for recursion.
-String PathJoin(Arena* arena, String a, String b);
+inline StringView PathJoin(Arena*, StringView a) { return a; }  // Base case for recursion.
+StringView PathJoin(Arena* arena, StringView a, StringView b);
 
 // Recursive variadic template to handle arbitrary number of paths
 template <typename... Paths>
-String PathJoin(Arena* arena, String first, String second, Paths... rest) {
+StringView PathJoin(Arena* arena, StringView first, StringView second, Paths... rest) {
     // Join the first two paths, then recursively join with the rest
     // TODO(cdc): This is very dumb, as it will allocate every sub-path, but this ok for now.
     return PathJoin(arena, PathJoin(arena, first, second), rest...);
 }
 
 struct DirEntry {
-    String Path = {};
+    StringView Path = {};
     SDL_PathInfo Info = {};
 
     bool IsFile() const { return Info.type == SDL_PATHTYPE_FILE; }
     bool IsDir() const { return Info.type == SDL_PATHTYPE_DIRECTORY; }
 };
 
-std::span<DirEntry> ListDir(Arena* arena, String path);
+std::span<DirEntry> ListDir(Arena* arena, StringView path);
 
 // Useful for printing line numbers without the bazel nonesense.
-String CleanPathFromBazel(String path);
+StringView CleanPathFromBazel(StringView path);
 
 }  // namespace paths
 
 // System ------------------------------------------------------------------------------------------
 // TODO(cdc): Move to a more "system" like place.
 
-String GetEnv(Arena* arena, const char* env);
+StringView GetEnv(Arena* arena, const char* env);
 
 }  // namespace kdk

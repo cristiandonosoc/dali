@@ -9,7 +9,7 @@ namespace memory_private {
 
 static constexpr u32 kScratchArenaSize = 32 * MEGABYTE;
 
-Array<String, 8> kScratchArenaNames = {
+Array<StringView, 8> kScratchArenaNames = {
     "ScratchArena0"sv,
     "ScratchArena1"sv,
     "ScratchArena2"sv,
@@ -123,7 +123,7 @@ void ConsolidateNumbers(Arena* arena) {
 
 }  // namespace memory_private
 
-String ToString(EArenaType type) {
+StringView ToString(EArenaType type) {
     switch (type) {
         case EArenaType::FixedSize: return "FixedSize"sv;
         case EArenaType::Extendable: return "Extendable"sv;
@@ -149,7 +149,7 @@ bool IsValid(const Arena& arena) {
     return true;
 }
 
-Arena AllocateArena(String name, u64 size, EArenaType type) {
+Arena AllocateArena(StringView name, u64 size, EArenaType type) {
     Arena out = {};
     switch (type) {
         case EArenaType::FixedSize: {
@@ -190,9 +190,9 @@ void FreeArena(Arena* arena) {
     }
 }
 
-Arena CarveArena(String name, Arena* arena, u64 size) {
+Arena CarveArena(StringView name, Arena* arena, u64 size) {
     auto scratch = GetScratchArena(arena);
-    String out_name = Printf(scratch, "%s:%s", arena->Name.Str(), name.Str());
+    StringView out_name = Printf(scratch, "%s:%s", arena->Name.Str(), name.Str());
 
     Arena out = {
         .Start = ArenaPush(arena, size).data(),
@@ -268,7 +268,7 @@ std::span<Arena> ReferenceScratchArenas() {
     if (!gInitialized) [[unlikely]] {
         for (i32 i = 0; i < kScratchArenaCount; i++) {
             Arena& arena = gArenas[i];
-            String name = kScratchArenaNames[i];
+            StringView name = kScratchArenaNames[i];
             arena = AllocateArena(name, kScratchArenaSize);
         }
 
@@ -326,7 +326,7 @@ void Init(BlockArenaManager* bam) {
     {                                                                           \
         u32 size = sizeof(BlockArena<BLOCK_SIZE, BLOCK_COUNT>);                 \
         auto* block_arena = (BlockArena<BLOCK_SIZE, BLOCK_COUNT>*)malloc(size); \
-        block_arena->Init(String("BlockArena_" #SIZE_NAME));                    \
+        block_arena->Init(StringView("BlockArena_" #SIZE_NAME));                    \
         bam->_BlockArena_##SIZE_NAME = block_arena;                             \
     }
     BLOCK_ARENA_TYPES(X)
@@ -430,7 +430,7 @@ void* AlignForward(void* ptr, u64 alignment) {
     return (void*)v;
 }
 
-String ToMemoryString(Arena* arena, u64 bytes) {
+StringView ToMemoryString(Arena* arena, u64 bytes) {
     // Define thresholds for different units
     constexpr f64 kb_threshold = (f64)KILOBYTE;
     constexpr f64 mb_threshold = (f64)MEGABYTE;

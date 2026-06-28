@@ -28,7 +28,7 @@ enum class EArenaType : u8 {
     // reported memory is available.
     Extendable,
 };
-String ToString(EArenaType type);
+StringView ToString(EArenaType type);
 
 struct Arena {
     u8* Start = nullptr;
@@ -64,7 +64,7 @@ struct Arena {
 };
 bool IsValid(const Arena& arena);
 
-Arena AllocateArena(String name, u64 size, EArenaType type = EArenaType::FixedSize);
+Arena AllocateArena(StringView name, u64 size, EArenaType type = EArenaType::FixedSize);
 void FreeArena(Arena* arena);
 
 // Creates an arena from another arena.
@@ -72,7 +72,7 @@ void FreeArena(Arena* arena);
 // Returns an FixedSize arena.
 // IMPORTANT: It is the caller responsability that the owning arena will not be cleaned before this
 // one. Basically correctly manage the arena lifetimes.
-Arena CarveArena(String name, Arena* arena, u64 size);
+Arena CarveArena(StringView name, Arena* arena, u64 size);
 
 void ArenaReset(Arena* arena);
 [[nodiscard]] std::span<u8> ArenaPush(Arena* arena, u64 size, u64 alignment = 8);
@@ -171,7 +171,7 @@ struct BlockArena {
         i32 AllocatedBlocks = 0;
     } Stats;
 
-    void Init(String name);
+    void Init(StringView name);
     void Shutdown() {}
     [[nodiscard]] BlockAllocationResult AllocateBlock(
         std::source_location source_location = std::source_location::current());
@@ -206,7 +206,7 @@ static_assert(BlockArena<  1 * MEGABYTE, 1024>::kBlockShift == 20);
 // clang-format on
 
 template <u32 BLOCK_SIZE, u32 BLOCK_COUNT>
-void BlockArena<BLOCK_SIZE, BLOCK_COUNT>::Init(String name) {
+void BlockArena<BLOCK_SIZE, BLOCK_COUNT>::Init(StringView name) {
     Name = name;
     for (u32 i = 0; i < BLOCK_COUNT; i++) {
         BlocksFreeList[i] = i + 1;
@@ -359,7 +359,7 @@ void* AlignForward(void* ptr, u64 alignment);
 
 // UTILITIES ---------------------------------------------------------------------------------------
 
-String ToMemoryString(Arena* arena, u64 bytes);
+StringView ToMemoryString(Arena* arena, u64 bytes);
 
 template <typename T>
 void ZeroSpan(std::span<T> span) {
