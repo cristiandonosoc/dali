@@ -88,9 +88,15 @@ struct Function<R(Args...), N> {
     static Function Create(F&& func) {
         using Functor = function_private::Functor<std::remove_cvref_t<F>>;
 
-        static_assert(std::is_trivially_destructible_v<Functor>);
-        static_assert(sizeof(Functor) <= sizeof(Dummy));
-        static_assert(alignof(Functor) <= alignof(Dummy));
+        static_assert(std::is_trivially_destructible_v<Functor>,
+                      "Lambda captures must be trivially destructible (no owning types like "
+                      "std::string, std::vector, etc. — only pointers and references).");
+        static_assert(sizeof(Functor) <= sizeof(Dummy),
+                      "Lambda is too large for this Function's inline storage. "
+                      "Reduce the number of captures, or increase N in Function<Sig, N>. "
+                      "Hint: sizeof(lambda captures) must be <= N * sizeof(void*).");
+        static_assert(alignof(Functor) <= alignof(Dummy),
+                      "Lambda has stricter alignment than this Function's inline storage supports.");
 
         Function f;
         new (&f.Storage) Functor{std::forward<F>(func)};
