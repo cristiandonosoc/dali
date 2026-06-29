@@ -1,5 +1,7 @@
 #include <engine/core/memory.h>
 
+#include <engine/core/container.h>
+
 #include <cstdlib>
 #include <cstring>
 
@@ -326,7 +328,7 @@ void Init(BlockArenaManager* bam) {
     {                                                                           \
         u32 size = sizeof(BlockArena<BLOCK_SIZE, BLOCK_COUNT>);                 \
         auto* block_arena = (BlockArena<BLOCK_SIZE, BLOCK_COUNT>*)malloc(size); \
-        block_arena->Init(StringView("BlockArena_" #SIZE_NAME));                    \
+        block_arena->Init(StringView("BlockArena_" #SIZE_NAME));                \
         bam->_BlockArena_##SIZE_NAME = block_arena;                             \
     }
     BLOCK_ARENA_TYPES(X)

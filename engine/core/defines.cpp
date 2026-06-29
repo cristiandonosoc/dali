@@ -1,5 +1,6 @@
 #include <engine/core/defines.h>
 
+#include <engine/core/filesystem.h>
 #include <engine/core/memory.h>
 #include <engine/core/string.h>
 
@@ -21,7 +22,7 @@ struct RunningInTest_Setter {
         const char* env = nullptr;
         char buf[1024];
         size_t required_size;
-        if (errno_t err = getenv_s(&required_size, buf, 1024, env) != 0) {
+        if (getenv_s(&required_size, buf, 1024, env) != 0) {
             gRunningInTest = false;
         } else {
             if (required_size == 0) {

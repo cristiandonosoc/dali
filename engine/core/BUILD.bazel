@@ -6,13 +6,16 @@ cc_library(
     name = "core",
     srcs = [
         "defines.cpp",
+        "filesystem.cpp",
         "memory.cpp",
         "string.cpp",
     ],
     hdrs = [
         "algorithm.h",
+        "array.h",
         "container.h",
         "defines.h",
+        "filesystem.h",
         "function.h",
         "memory.h",
         "string.h",

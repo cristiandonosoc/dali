@@ -1,9 +1,11 @@
 #pragma once
 
+#include <engine/core/array.h>
 #include <engine/core/defines.h>
 #include <engine/core/string.h>
 
 #include <bit>
+#include <limits>
 #include <source_location>
 #include <span>
 

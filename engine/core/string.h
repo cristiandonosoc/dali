@@ -1,9 +1,7 @@
 #pragma once
 
-#include <engine/core/container.h>
+#include <engine/core/array.h>
 #include <engine/core/defines.h>
-
-#include <SDL3/SDL_filesystem.h>
 
 #include <cstring>
 #include <span>
@@ -71,7 +69,9 @@ struct FixedString {
     FixedString(std::string_view sv) { Set(StringView(sv)); }
     FixedString(StringView string) { Set(string); }
 
-    void Set(const char* str, bool trap_truncation = false) { Set(StringView(str), trap_truncation); }
+    void Set(const char* str, bool trap_truncation = false) {
+        Set(StringView(str), trap_truncation);
+    }
     void Set(StringView string, bool trap_truncation = false) {
         Size = (u32)string.Size;
         if (Size >= CAPACITY) {
@@ -143,52 +143,5 @@ StringView Printf(Arena* arena, const char* fmt, ...);
 StringView ToString(Arena* arena, const std::source_location& location);
 
 void PrintBacktrace(Arena* arena, u32 frames_to_skip = 0);
-
-// Paths -------------------------------------------------------------------------------------------
-
-namespace paths {
-
-bool IsAbsolute(const char* path);
-inline bool IsAbsolute(const StringView& path) { return IsAbsolute(path.Str()); }
-
-// The directory this program was run from.
-StringView GetBaseDir(Arena* arena);
-
-StringView GetDirname(Arena* arena, StringView path);
-StringView GetBasename(Arena* arena, StringView path);
-StringView GetExtension(Arena* arena, StringView path);
-StringView RemoveExtension(Arena* arena, StringView path);
-StringView ChangeExtension(Arena* arena, StringView original, StringView new_ext);
-
-inline StringView PathJoin(Arena*, StringView a) { return a; }  // Base case for recursion.
-StringView PathJoin(Arena* arena, StringView a, StringView b);
-
-// Recursive variadic template to handle arbitrary number of paths
-template <typename... Paths>
-StringView PathJoin(Arena* arena, StringView first, StringView second, Paths... rest) {
-    // Join the first two paths, then recursively join with the rest
-    // TODO(cdc): This is very dumb, as it will allocate every sub-path, but this ok for now.
-    return PathJoin(arena, PathJoin(arena, first, second), rest...);
-}
-
-struct DirEntry {
-    StringView Path = {};
-    SDL_PathInfo Info = {};
-
-    bool IsFile() const { return Info.type == SDL_PATHTYPE_FILE; }
-    bool IsDir() const { return Info.type == SDL_PATHTYPE_DIRECTORY; }
-};
-
-std::span<DirEntry> ListDir(Arena* arena, StringView path);
-
-// Useful for printing line numbers without the bazel nonesense.
-StringView CleanPathFromBazel(StringView path);
-
-}  // namespace paths
-
-// System ------------------------------------------------------------------------------------------
-// TODO(cdc): Move to a more "system" like place.
-
-StringView GetEnv(Arena* arena, const char* env);
 
 }  // namespace kdk
