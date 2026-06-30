@@ -1,6 +1,14 @@
 ### BUILD
 
-build --cxxopt="/std:c++20"
+common --enable_platform_specific_config
+
+# Drop the toolchain's built-in /std:c++17 so our standard is the only /std flag
+# (otherwise MSVC warns D9025: overriding '/std:c++17' with '/std:c++20').
+build --features=-default_cpp_std
+build:windows --cxxopt="/std:c++20"
+build:linux   --cxxopt="-std=c++20"
+build:macos   --cxxopt="-std=c++20"
+
 build --cxxopt="/FC"
 build --linkopt="/debug"
 build --compilation_mode=dbg
