@@ -43,8 +43,33 @@ bazel build //...     # build without running tests
 - `_` prefix on private/internal struct members (`_Str`, `_Entity`)
 - `g` prefix on globals (`gRunningInTest`)
 - X macros used heavily for type registration (entity types, component types, asset types)
-- Arena-based allocation — prefer `Arena*` + `ArenaPush` over `new`/`delete`
+- Arena-based allocation — prefer `Arena*` + member methods (e.g. `arena->Push`) over `new`/`delete`
 - No comments unless the WHY is non-obvious
+
+### Struct layout
+
+We don't use classes, we use structs. Members are declared in this fixed order:
+
+```cpp
+struct Name {
+    Members;                          // public data
+    int _PrivateMembers = 0;          // "private" — public but `_`-prefixed by convention
+    static Foo StaticFunctions();     // factory / lifecycle helpers with no `this`
+    void MemberFunctions();           // operate on `this`
+};
+```
+
+This is a bit unusual — most C++ style guides put methods before data, or interleave
+public/private access sections. Trade-offs:
+
+- **Pros:** data-first reads like a plain aggregate (which these structs are — no access
+  control, brace-initializable); a single glance shows the memory layout before behavior; the
+  `_` naming convention replaces `private:` sections, so there's one obvious ordering with no
+  access-specifier bookkeeping; static vs. member split makes "constructs one" vs. "acts on one"
+  visually separable.
+- **Cons:** goes against reader expectations and most tooling defaults (clang-format won't enforce
+  it); `_`-prefixed members are only conventionally private — the compiler won't stop external
+  access; data-first means you scroll past all fields to reach the API of a large struct.
 
 ## Clang-format
 
@@ -57,8 +82,8 @@ separately.
 |------|-------------|
 | `StringView` | Non-owning string (`const char*` + size). Use `Str()` for C API calls — never returns null. Distinguished `IsValid()` (non-null ptr) vs `IsEmpty()` (zero size). |
 | `FixedString<N>` | Stack-owned null-terminated string with fixed capacity. Used for names stored in structs. |
-| `Arena` | Linear allocator. `ArenaPush`, `ArenaPushZero`, `ArenaPushArray`. Two types: `FixedSize` (traps on overflow) and `Extendable` (chains new blocks). |
-| `ScopedArena` | RAII scope that resets an arena on exit. Get one via `GetScratchArena()`. |
+| `Arena` | Linear allocator. Member methods `Push`, `PushZero`, `PushArray`; static `Allocate`/`Free`/`GetScratch`. |
+| `ScopedArena` | RAII scope that resets an arena on exit. Get one via `Arena::GetScratch()`. |
 | `Array<T, N>` | Fixed-size stack array with bounds-checked access. |
 | `FixedVector<T, N>` | Fixed-capacity growable array. |
 

@@ -83,7 +83,7 @@ StringView GetExtension(Arena* arena, StringView path) {
 }
 
 StringView RemoveExtension(Arena* arena, StringView path) {
-    auto scratch = GetScratchArena(arena);
+    auto scratch = Arena::GetScratch(arena);
     StringView extension = GetExtension(scratch, path);
     if (extension.IsEmpty()) {
         return path;
@@ -104,7 +104,7 @@ StringView ChangeExtension(Arena* arena, StringView original, StringView new_ext
     }
 
     ASSERT(new_ext.Str()[0] == '.');
-    auto scratch = GetScratchArena(arena);
+    auto scratch = Arena::GetScratch(arena);
 
     StringView clean = RemoveExtension(scratch, original);
     return Concat(arena, clean, new_ext);
@@ -121,7 +121,7 @@ StringView PathJoin(Arena* arena, StringView a, StringView b) {
 
     // Worst case we string them together.
     u64 buffer_size = a.Size + b.Size + 2;
-    char* buffer = (char*)ArenaPush(arena, buffer_size).data();
+    char* buffer = (char*)arena->Push(buffer_size).data();
     u64 size = 0;
     if (size = cwk_path_join(a.Str(), b.Str(), buffer, buffer_size); size == 0) {
         return {};
@@ -169,7 +169,7 @@ std::span<DirEntry> ListDir(Arena* arena, StringView path) {
 
     EnumerateDirectoryCallbackData data{
         .ResultArena = arena,
-        .Entries = ArenaPushArray<DirEntry>(arena, kMaxFilesInDirectory).data(),
+        .Entries = arena->PushArray<DirEntry>(kMaxFilesInDirectory).data(),
     };
 
     if (!SDL_EnumerateDirectory(path.Str(), EnumerateDirectoryCallback, &data)) {
@@ -194,7 +194,7 @@ StringView CleanPathFromBazel(StringView path) {
 // System ------------------------------------------------------------------------------------------
 
 StringView GetEnv(Arena* arena, const char* env) {
-    char* buf = (char*)ArenaPushZero(arena, 1024).data();
+    char* buf = (char*)arena->PushZero(1024).data();
     size_t required_size;
     errno_t err = getenv_s(&required_size, buf, 1024, env);
     if (err) {

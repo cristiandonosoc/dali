@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(bazel test:*)",
+      "Bash(bazel test:*)"
+    ]
+  }
+}

@@ -72,7 +72,7 @@ StringView InternStringToArena(Arena* arena, const char* string, u64 length) {
         length = std::strlen(string);
     }
 
-    auto dst = ArenaPush(arena, length + 1);
+    auto dst = arena->Push(length + 1);
     std::memcpy(dst.data(), string, length);
     dst[length] = 0;  // The null terminator.
     return StringView((char*)dst.data(), length);
@@ -92,7 +92,7 @@ StringView Concat(Arena* arena, StringView a, StringView b) {
     }
 
     i64 buffer_size = a.Size + b.Size + 1;
-    auto data = ArenaPush(arena, buffer_size);
+    auto data = arena->Push(buffer_size);
     char* buffer = (char*)data.data();
     char* ptr = buffer;
     std::memcpy(ptr, a.Str(), a.Size);
@@ -147,7 +147,7 @@ StringView RemovePrefix(Arena* arena, StringView path, StringView prefix) {
 
 StringView Printf(Arena* arena, const char* fmt, ...) {
     int size = 4 * STB_SPRINTF_MIN;
-    auto data = ArenaPush(arena, size);
+    auto data = arena->Push(size);
     char* buf = (char*)data.data();
     va_list va;
     va_start(va, fmt);
@@ -194,7 +194,7 @@ void PrintBacktrace(Arena* arena, u32 frames_to_skip) {
     SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
 
     // Symbol info buffer.
-    SYMBOL_INFO* symbol = (SYMBOL_INFO*)ArenaPushZero(arena, sizeof(SYMBOL_INFO) + 256).data();
+    SYMBOL_INFO* symbol = (SYMBOL_INFO*)arena->PushZero(sizeof(SYMBOL_INFO) + 256).data();
     symbol->MaxNameLen = 255;
     symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
 

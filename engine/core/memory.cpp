@@ -34,23 +34,23 @@ void FreeMemory(Arena* arena, void* ptr) {
 
 }  // namespace memory_private
 
-bool IsValid(const Arena& arena) {
-    if (!arena.Start) {
+bool Arena::IsValid() const {
+    if (!Start) {
         return false;
     }
 
-    if (arena.Size == 0) {
+    if (Size == 0) {
         return false;
     }
 
-    if (arena.Offset >= arena.Size) {
+    if (Offset >= Size) {
         return false;
     }
 
     return true;
 }
 
-Arena AllocateArena(StringView name, u64 size) {
+Arena Arena::Allocate(StringView name, u64 size) {
     Arena out = {};
     Arena arena{
         .Size = size,
@@ -63,51 +63,49 @@ Arena AllocateArena(StringView name, u64 size) {
     return out;
 }
 
-void FreeArena(Arena* arena) {
-    ASSERT(IsValid(*arena));
+void Arena::Free(Arena* arena) {
+    ASSERT(arena->IsValid());
 
     memory_private::FreeMemory(arena, arena->Start);
 }
 
-Arena CarveArena(StringView name, Arena* arena, u64 size) {
-    auto scratch = GetScratchArena(arena);
-    StringView out_name = Printf(scratch, "%s:%s", arena->Name.Str(), name.Str());
+Arena Arena::Carve(StringView name, u64 size) {
+    auto scratch = Arena::GetScratch(this);
+    StringView out_name = Printf(scratch, "%s:%s", Name.Str(), name.Str());
 
     Arena out = {
         .Name = out_name,
-        .Start = ArenaPush(arena, size).data(),
+        .Start = Push(size).data(),
         .Size = size,
     };
 
     return out;
 }
 
-void ArenaReset(Arena* arena) { arena->Offset = 0; }
-
-std::span<u8> ArenaPush(Arena* arena, u64 size, u64 alignment) {
-    ASSERT(IsValid(*arena));
+std::span<u8> Arena::Push(u64 size, u64 alignment) {
+    ASSERT(IsValid());
 
     u8* out = nullptr;
 
     // Determine the new offset
-    u8* ptr = arena->Start + arena->Offset;
+    u8* ptr = Start + Offset;
     ptr = (u8*)AlignForward(ptr, alignment);
-    u64 offset = ptr - arena->Start;
+    u64 offset = ptr - Start;
 
-    ASSERT(offset + size < arena->Size);
-    arena->Offset = offset + size;
+    ASSERT(offset + size < Size);
+    Offset = offset + size;
     out = ptr;
 
     return {out, size};
 }
 
-std::span<u8> ArenaPushZero(Arena* arena, u64 size, u64 alignment) {
-    auto data = ArenaPush(arena, size, alignment);
+std::span<u8> Arena::PushZero(u64 size, u64 alignment) {
+    auto data = Push(size, alignment);
     std::memset(data.data(), 0, size);
     return data;
 }
 
-std::span<Arena> ReferenceScratchArenas() {
+std::span<Arena> Arena::ReferenceScratch() {
     using namespace memory_private;
     constexpr i32 kScratchArenaCount = 4;
     static_assert(kScratchArenaCount <= (i32)kScratchArenaNames.Size,
@@ -118,7 +116,7 @@ std::span<Arena> ReferenceScratchArenas() {
         for (i32 i = 0; i < kScratchArenaCount; i++) {
             Arena& arena = gArenas[i];
             StringView name = kScratchArenaNames[i];
-            arena = AllocateArena(name, kScratchArenaSize);
+            arena = Arena::Allocate(name, kScratchArenaSize);
         }
 
         gInitialized = true;
@@ -135,13 +133,13 @@ ScopedArena::~ScopedArena() {
     Arena->Offset = OriginalOffset;
 }
 
-ScopedArena GetScratchArena(Arena* conflict1, Arena* conflict2) {
+ScopedArena Arena::GetScratch(Arena* conflict1, Arena* conflict2) {
     Arena* conflicts[2] = {
         conflict1,
         conflict2,
     };
 
-    auto scratch_arenas = ReferenceScratchArenas();
+    auto scratch_arenas = Arena::ReferenceScratch();
 
     // Search for a valid scratch arena.
     Arena* scratch_arena = nullptr;
@@ -279,7 +277,7 @@ void* AlignForward(void* ptr, u64 alignment) {
     return (void*)v;
 }
 
-StringView ToMemoryString(Arena* arena, u64 bytes) {
+StringView Arena::ToMemoryString(u64 bytes) {
     // Define thresholds for different units
     constexpr f64 kb_threshold = (f64)KILOBYTE;
     constexpr f64 mb_threshold = (f64)MEGABYTE;
@@ -307,7 +305,7 @@ StringView ToMemoryString(Arena* arena, u64 bytes) {
     }
 
     // For fractional numbers, show up to 2 decimal places
-    return Printf(arena, "%.2f %s", value, suffix);
+    return Printf(this, "%.2f %s", value, suffix);
 }
 
 }  // namespace kdk

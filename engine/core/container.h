@@ -4,13 +4,12 @@
 #include <engine/core/array.h>
 #include <engine/core/defines.h>
 #include <engine/core/function.h>
+#include <engine/core/memory.h>
 
 #include <cstddef>
 #include <span>
 
 namespace kdk {
-
-struct Arena;
 
 template <typename T>
 std::span<T> MakeSpan(T& t) {
@@ -280,7 +279,7 @@ static_assert(sizeof(DynArray<int>) == 24);
 
 template <typename T>
 DynArray<T> NewDynArray(Arena* arena, i32 initial_cap = kDynArrayInitialCap) {
-    T* base = (T*)ArenaPush(arena, initial_cap * sizeof(T), alignof(T)).data();
+    T* base = (T*)arena->Push(initial_cap * sizeof(T), alignof(T)).data();
     return DynArray<T>{
         ._Arena = arena,
         ._Data = base,
@@ -822,7 +821,7 @@ void DynArray<T>::SetArena(Arena* arena) {
     _Arena = arena;
 
     // Need to transfer existing data into the new arena.
-    T* new_base = ArenaPushArray<T>(_Arena, Cap).data();
+    T* new_base = _Arena->PushArray<T>(Cap).data();
 
     if constexpr (std::is_trivially_copyable_v<T>) {
         std::memcpy(new_base, _Data, Size * sizeof(T));
@@ -853,13 +852,13 @@ T& DynArray<T>::Push(const T& value) {
     if (Cap == 0) [[unlikely]] {
         ASSERT(Size == 0);
         Cap = kDynArrayInitialCap;
-        _Data = ArenaPushArray<T>(_Arena, Cap).data();
+        _Data = _Arena->PushArray<T>(Cap).data();
     }
 
     // Get more memory.
     if (Size == Cap) [[unlikely]] {
         Cap += Cap;
-        T* new_base = ArenaPushArray<T>(_Arena, Cap).data();
+        T* new_base = _Arena->PushArray<T>(Cap).data();
 
         if constexpr (std::is_trivially_copyable_v<T>) {
             std::memcpy(new_base, _Data, Size * sizeof(T));
@@ -919,7 +918,7 @@ void DynArray<T>::Reserve(i32 new_cap) {
         return;  // Already have enough capacity
     }
 
-    T* new_base = ArenaPushArray<T>(_Arena, new_cap).data();
+    T* new_base = _Arena->PushArray<T>(new_cap).data();
 
     if (Size > 0) {
         if constexpr (std::is_trivially_copyable_v<T>) {

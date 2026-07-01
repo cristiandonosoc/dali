@@ -11,6 +11,8 @@
 
 namespace kdk {
 
+struct Arena;
+
 // System ------------------------------------------------------------------------------------------
 
 constexpr u64 BYTE = 1;
@@ -20,78 +22,6 @@ constexpr u64 GIGABYTE = 1024 * MEGABYTE;
 constexpr u64 TERABYTE = 1024 * GIGABYTE;
 
 // Arenas ------------------------------------------------------------------------------------------
-
-struct Arena {
-    FixedString<124> Name = {};
-    u8* Start = nullptr;
-    // NOTE: Shows the size of this particular arena.
-    //       In the case of Extendable arenas, this represents only that "link".
-    //       To know the total size of the arena, refer to |ExtendableData.TotalSize|.
-    u64 Size = 0;
-    u64 Offset = 0;
-
-    struct Stats {
-        u32 AllocCalls = 0;
-        u32 FreeCalls = 0;
-    } Stats = {};
-
-    Arena* ParentArena = nullptr;
-
-    Arena* GetPtr() { return this; }
-};
-bool IsValid(const Arena& arena);
-
-Arena AllocateArena(StringView name, u64 size);
-void FreeArena(Arena* arena);
-
-// Creates an arena from another arena.
-//
-// Returns an FixedSize arena.
-// IMPORTANT: It is the caller responsability that the owning arena will not be cleaned before this
-// one. Basically correctly manage the arena lifetimes.
-Arena CarveArena(StringView name, Arena* arena, u64 size);
-
-void ArenaReset(Arena* arena);
-[[nodiscard]] std::span<u8> ArenaPush(Arena* arena, u64 size, u64 alignment = 8);
-[[nodiscard]] std::span<u8> ArenaPushZero(Arena* arena, u64 size, u64 alignment = 8);
-
-template <typename T>
-T* ArenaPush(Arena* arena) {
-    return (T*)ArenaPush(arena, sizeof(T), alignof(T)).data();
-}
-
-template <typename T>
-T* ArenaPushZero(Arena* arena) {
-    return (T*)ArenaPushZero(arena, sizeof(T), alignof(T)).data();
-}
-
-// Allocates memory and calls the struct initializer.
-template <typename T>
-T* ArenaPushInit(Arena* arena) {
-    auto data = ArenaPushZero(arena, sizeof(T), alignof(T));
-    T* t = (T*)data.data();
-    new (t) T;  // Placement new.
-    return t;
-}
-
-template <typename T>
-[[nodiscard]] std::span<T> ArenaPushArray(Arena* arena, u64 count) {
-    T* t = (T*)ArenaPush(arena, count * sizeof(T), alignof(T)).data();
-    return {t, count};
-}
-
-template <typename T>
-[[nodiscard]] std::span<T> ArenaPushArrayZero(Arena* arena, u64 count) {
-    T* t = (T*)ArenaPushZero(arena, count * sizeof(T), alignof(T)).data();
-    return {t, count};
-}
-
-// Copy into the arena some data.
-[[nodiscard]] inline std::span<u8> ArenaCopy(Arena* arena, std::span<u8> data, u64 alignment = 8) {
-    auto new_data = ArenaPush(arena, data.size_bytes(), alignment);
-    std::memcpy(new_data.data(), data.data(), data.size_bytes());
-    return new_data;
-}
 
 // Non-copyable, Non-movable RAII style temporary arena.
 // This is meant to be used in the scope of a stack frame only.
@@ -111,12 +41,88 @@ struct ScopedArena {
     ScopedArena(ScopedArena&&) = delete;
     ScopedArena& operator=(ScopedArena&&) = delete;
 };
-inline ScopedArena GetScopedArena(Arena* arena) { return ScopedArena(arena, arena->Offset); }
 
-ScopedArena GetScratchArena(Arena* conflict1 = nullptr, Arena* conflict2 = nullptr);
+struct Arena {
+    FixedString<124> Name = {};
+    u8* Start = nullptr;
+    // NOTE: Shows the size of this particular arena.
+    //       In the case of Extendable arenas, this represents only that "link".
+    //       To know the total size of the arena, refer to |ExtendableData.TotalSize|.
+    u64 Size = 0;
+    u64 Offset = 0;
 
-// Use for testing.
-std::span<Arena> ReferenceScratchArenas();
+    struct Stats {
+        u32 AllocCalls = 0;
+        u32 FreeCalls = 0;
+    } Stats = {};
+
+    Arena* ParentArena = nullptr;
+
+    static Arena Allocate(StringView name, u64 size);
+    static void Free(Arena* arena);
+
+    static ScopedArena GetScratch(Arena* conflict1 = nullptr, Arena* conflict2 = nullptr);
+
+    // Use for testing.
+    static std::span<Arena> ReferenceScratch();
+
+    Arena* GetPtr() { return this; }
+    bool IsValid() const;
+
+    // Creates an arena from this one.
+    //
+    // Returns an FixedSize arena.
+    // IMPORTANT: It is the caller responsability that this owning arena will not be cleaned before
+    // the returned one. Basically correctly manage the arena lifetimes.
+    Arena Carve(StringView name, u64 size);
+
+    void Reset() { Offset = 0; }
+
+    [[nodiscard]] std::span<u8> Push(u64 size, u64 alignment = 8);
+    [[nodiscard]] std::span<u8> PushZero(u64 size, u64 alignment = 8);
+
+    template <typename T>
+    T* Push() {
+        return (T*)Push(sizeof(T), alignof(T)).data();
+    }
+
+    template <typename T>
+    T* PushZero() {
+        return (T*)PushZero(sizeof(T), alignof(T)).data();
+    }
+
+    // Allocates memory and calls the struct initializer.
+    template <typename T>
+    T* PushInit() {
+        auto data = PushZero(sizeof(T), alignof(T));
+        T* t = (T*)data.data();
+        new (t) T;  // Placement new.
+        return t;
+    }
+
+    template <typename T>
+    [[nodiscard]] std::span<T> PushArray(u64 count) {
+        T* t = (T*)Push(count * sizeof(T), alignof(T)).data();
+        return {t, count};
+    }
+
+    template <typename T>
+    [[nodiscard]] std::span<T> PushArrayZero(u64 count) {
+        T* t = (T*)PushZero(count * sizeof(T), alignof(T)).data();
+        return {t, count};
+    }
+
+    // Copy into this arena some data.
+    [[nodiscard]] std::span<u8> Copy(std::span<u8> data, u64 alignment = 8) {
+        auto new_data = Push(data.size_bytes(), alignment);
+        std::memcpy(new_data.data(), data.data(), data.size_bytes());
+        return new_data;
+    }
+
+    ScopedArena GetScoped() { return ScopedArena(this, Offset); }
+
+    StringView ToMemoryString(u64 bytes);
+};
 
 // BLOCK ARENA -------------------------------------------------------------------------------------
 
@@ -335,8 +341,6 @@ void* Align(void* ptr, u64 alignment);
 void* AlignForward(void* ptr, u64 alignment);
 
 // UTILITIES ---------------------------------------------------------------------------------------
-
-StringView ToMemoryString(Arena* arena, u64 bytes);
 
 template <typename T>
 void ZeroSpan(std::span<T> span) {

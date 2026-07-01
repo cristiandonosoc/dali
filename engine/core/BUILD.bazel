@@ -35,6 +35,7 @@ cc_test(
     name = "tests",
     srcs = [
         "function_test.cpp",
+        "memory_test.cpp",
     ],
     testonly = True,
     size = "small",
