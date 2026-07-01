@@ -21,18 +21,8 @@ constexpr u64 TERABYTE = 1024 * GIGABYTE;
 
 // Arenas ------------------------------------------------------------------------------------------
 
-enum class EArenaType : u8 {
-    // Simple one buffer arena. Traps if the size is exceeded.
-    FixedSize,
-    // Starts as fixed size, but when the next allocation would overflow, it will allocate a new
-    // arena of the same size and "chain" to it.
-    // Note that uses some memory at the end of the buffer for the link data structure, so not all
-    // reported memory is available.
-    Extendable,
-};
-StringView ToString(EArenaType type);
-
 struct Arena {
+    FixedString<124> Name = {};
     u8* Start = nullptr;
     // NOTE: Shows the size of this particular arena.
     //       In the case of Extendable arenas, this represents only that "link".
@@ -40,25 +30,10 @@ struct Arena {
     u64 Size = 0;
     u64 Offset = 0;
 
-    EArenaType Type = EArenaType::FixedSize;
-
     struct Stats {
         u32 AllocCalls = 0;
         u32 FreeCalls = 0;
     } Stats = {};
-
-    union {
-        struct {
-        } FixedData;
-        struct {
-            Arena* NextArena = nullptr;
-            // The size of _this_ link.
-            u64 MaxLinkOffset = 0;
-            u64 TotalSize = 0;
-        } ExtendableData;
-    };
-
-    FixedString<124> Name = {};
 
     Arena* ParentArena = nullptr;
 
@@ -66,7 +41,7 @@ struct Arena {
 };
 bool IsValid(const Arena& arena);
 
-Arena AllocateArena(StringView name, u64 size, EArenaType type = EArenaType::FixedSize);
+Arena AllocateArena(StringView name, u64 size);
 void FreeArena(Arena* arena);
 
 // Creates an arena from another arena.
