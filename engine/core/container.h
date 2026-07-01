@@ -16,8 +16,14 @@ std::span<T> MakeSpan(T& t) {
     return {&t, 1};
 }
 
+// MSVC STL implementation of std::optional just shoves a bool in there, so it's not particularly
+// special, so for now we implement our own to avoid bringing that header.
+// See container_test for some static_assets.
 template <typename T>
 struct Optional {
+    T _Value;
+    bool _HasValue;
+
     Optional() : _HasValue(false) {}  // Don't construct _Value in this case.
     Optional(const T& value) : _Value(value), _HasValue(true) {}
     Optional(T&& value) : _Value(std::move(value)), _HasValue(true) {}
@@ -62,10 +68,6 @@ struct Optional {
     }
 
     void Reset() { _HasValue = false; }
-
-   private:
-    T _Value;
-    bool _HasValue;
 };
 
 // FixedVector -------------------------------------------------------------------------------------
