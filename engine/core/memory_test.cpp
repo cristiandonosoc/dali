@@ -439,7 +439,7 @@ TEST_CASE("Scratch arena", "[memory]") {
         using namespace memory_test_private;
 
         {
-            ScopedArena scratch = Arena::GetScratch();
+            ScratchArena scratch = Arena::GetScratch();
             REQUIRE(scratch.Arena->Offset == 0);
 
             StringView msg1 = SomeFile(scratch.Arena, 33);
@@ -455,27 +455,35 @@ TEST_CASE("Scratch arena", "[memory]") {
         REQUIRE(scratch.Arena->Offset == 0);
     }
 
-    SECTION("Arena conflict") {
+    SECTION("Nested scratch arenas never collide") {
         using namespace memory_test_private;
 
+        // Two live scratch arenas are always distinct, without passing any conflicts.
         {
             auto scratch1 = Arena::GetScratch();
             auto scratch2 = Arena::GetScratch();
-            REQUIRE(scratch1.Arena == scratch2.Arena);
-        }
-
-        {
-            auto scratch1 = Arena::GetScratch();
-            auto scratch2 = Arena::GetScratch(scratch1.Arena);
             REQUIRE(scratch1.Arena != scratch2.Arena);
         }
 
+        // Three levels of nesting all get their own arena.
         {
             auto scratch1 = Arena::GetScratch();
-            auto scratch2 = Arena::GetScratch(scratch1.Arena);
-            ScopedArena scratch3 = Arena::GetScratch(scratch1.Arena, scratch2.Arena);
+            auto scratch2 = Arena::GetScratch();
+            ScratchArena scratch3 = Arena::GetScratch();
+            REQUIRE(scratch1.Arena != scratch2.Arena);
             REQUIRE(scratch1.Arena != scratch3.Arena);
             REQUIRE(scratch2.Arena != scratch3.Arena);
+        }
+
+        // A released lease returns to the pool and is reused by the next request.
+        {
+            Arena* first = nullptr;
+            {
+                auto scratch = Arena::GetScratch();
+                first = scratch.Arena;
+            }
+            auto scratch = Arena::GetScratch();
+            REQUIRE(scratch.Arena == first);
         }
     }
 
@@ -490,34 +498,36 @@ TEST_CASE("Scratch arena", "[memory]") {
 
         verify_arenas(0, 0, 0, 0);
 
-        auto fn1 = [&](Arena* arena1, Arena* arena2) {
-            auto scratch = Arena::GetScratch(arena1, arena2);
+        // Each nested call leases the next free arena; every level gets its own. Offsets grow
+        // on the way down and are restored (LIFO) as each lease goes out of scope.
+        auto fn1 = [&]() {
+            auto scratch = Arena::GetScratch();
+            REQUIRE(scratch.Arena == &scratch_arenas[3]);
+
+            auto result = scratch.Arena->Push(1024);
+            REQUIRE(result.size() == 1024);
+            verify_arenas(1024, 1024, 1024, 1024);
+        };
+
+        auto fn2 = [&]() {
+            auto scratch = Arena::GetScratch();
             REQUIRE(scratch.Arena == &scratch_arenas[2]);
 
             auto result = scratch.Arena->Push(1024);
             REQUIRE(result.size() == 1024);
-            verify_arenas(2048, 1024, 1024, 0);
+            verify_arenas(1024, 1024, 1024, 0);
+            fn1();
+            verify_arenas(1024, 1024, 1024, 0);
         };
 
-        auto fn2 = [&](Arena* arena) {
-            auto scratch = Arena::GetScratch(arena);
-            REQUIRE(scratch.Arena == &scratch_arenas[0]);
-
-            auto result = scratch.Arena->Push(1024);
-            REQUIRE(result.size() == 1024);
-            verify_arenas(2048, 1024, 0, 0);
-            fn1(arena, scratch.Arena);
-            verify_arenas(2048, 1024, 0, 0);
-        };
-
-        auto fn3 = [&](Arena* arena) {
-            auto scratch = Arena::GetScratch(arena);
+        auto fn3 = [&]() {
+            auto scratch = Arena::GetScratch();
             REQUIRE(scratch.Arena == &scratch_arenas[1]);
 
             auto result = scratch.Arena->Push(1024);
             REQUIRE(result.size() == 1024);
             verify_arenas(1024, 1024, 0, 0);
-            fn2(scratch.Arena);
+            fn2();
             verify_arenas(1024, 1024, 0, 0);
         };
 
@@ -527,7 +537,7 @@ TEST_CASE("Scratch arena", "[memory]") {
             auto result = scratch.Arena->Push(1024);
             REQUIRE(result.size() == 1024);
             verify_arenas(1024, 0, 0, 0);
-            fn3(scratch.Arena);
+            fn3();
             verify_arenas(1024, 0, 0, 0);
         }
         verify_arenas(0, 0, 0, 0);

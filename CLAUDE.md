@@ -83,7 +83,8 @@ separately.
 | `StringView` | Non-owning string (`const char*` + size). Use `Str()` for C API calls — never returns null. Distinguished `IsValid()` (non-null ptr) vs `IsEmpty()` (zero size). |
 | `FixedString<N>` | Stack-owned null-terminated string with fixed capacity. Used for names stored in structs. |
 | `Arena` | Linear allocator. Member methods `Push`, `PushZero`, `PushArray`; static `Allocate`/`Free`/`GetScratch`. |
-| `ScopedArena` | RAII scope that resets an arena on exit. Get one via `Arena::GetScratch()`. |
+| `ScopedArena` | RAII scope that resets an arena's offset on exit. Get one via `arena.GetScoped()`. |
+| `ScratchArena` | RAII lease over a global scratch arena, from `Arena::GetScratch()`. Marks its arena in-use for its lifetime so nested calls never collide; resets and releases it on exit. Stack-frame only — never move or store it. |
 | `Array<T, N>` | Fixed-size stack array with bounds-checked access. |
 | `FixedVector<T, N>` | Fixed-capacity growable array. |
 

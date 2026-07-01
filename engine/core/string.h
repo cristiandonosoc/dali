@@ -139,7 +139,7 @@ StringView RemovePrefix(Arena* arena, StringView path, StringView prefix);
 
 // Printf ------------------------------------------------------------------------------------------
 
-StringView Printf(Arena* arena, const char* fmt, ...);
+[[nodiscard]] StringView Printf(Arena* arena, const char* fmt, ...);
 StringView ToString(Arena* arena, const std::source_location& location);
 
 void PrintBacktrace(Arena* arena, u32 frames_to_skip = 0);

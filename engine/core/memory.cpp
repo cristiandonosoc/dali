@@ -70,7 +70,7 @@ void Arena::Free(Arena* arena) {
 }
 
 Arena Arena::Carve(StringView name, u64 size) {
-    auto scratch = Arena::GetScratch(this);
+    auto scratch = Arena::GetScratch();
     StringView out_name = Printf(scratch, "%s:%s", Name.Str(), name.Str());
 
     Arena out = {
@@ -133,33 +133,29 @@ ScopedArena::~ScopedArena() {
     Arena->Offset = OriginalOffset;
 }
 
-ScopedArena Arena::GetScratch(Arena* conflict1, Arena* conflict2) {
-    Arena* conflicts[2] = {
-        conflict1,
-        conflict2,
-    };
+ScratchArena::ScratchArena(struct Arena* arena) : Arena(arena), OriginalOffset(arena->Offset) {
+    Arena->_InUse = true;
+}
 
+ScratchArena::~ScratchArena() {
+    ASSERTF(Arena, "No weird shenanigans with arenas!");
+    Arena->Offset = OriginalOffset;
+    Arena->_InUse = false;
+}
+
+ScratchArena Arena::GetScratch() {
     auto scratch_arenas = Arena::ReferenceScratch();
 
-    // Search for a valid scratch arena.
-    Arena* scratch_arena = nullptr;
+    // Hand out the first scratch arena that isn't already leased. The lease (ScratchArena)
+    // keeps it marked in-use for its lifetime, so nested GetScratch() calls never collide.
     for (Arena& a : scratch_arenas) {
-        bool conflict_detected = false;
-        for (Arena* conflict : conflicts) {
-            if (conflict == &a) {
-                conflict_detected = true;
-                break;
-            }
-        }
-
-        if (!conflict_detected) {
-            scratch_arena = &a;
-            break;
+        if (!a._InUse) {
+            return ScratchArena(&a);
         }
     }
 
-    ASSERTF(scratch_arena, "No scratch arena could be found");
-    return ScopedArena(scratch_arena, scratch_arena->Offset);
+    ASSERTF(false, "No scratch arena could be found");
+    return ScratchArena(&scratch_arenas[0]);
 }
 
 // BLOCK ARENA MANAGER -----------------------------------------------------------------------------

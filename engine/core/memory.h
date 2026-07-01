@@ -29,8 +29,9 @@ struct ScopedArena {
     Arena* Arena = nullptr;
     u64 OriginalOffset = 0;
 
-    // Implicit converstion to Arena*
-    operator struct Arena *() { return Arena; }
+    // Implicit converstion to Arena*. Lvalue-qualified so it can't be called on a temporary
+    // (an inline `arena.GetScoped()` would reset at the end of the full expression — useless).
+    operator struct Arena *() & { return Arena; }
 
     explicit ScopedArena(struct Arena* arena, u64 original_offset);
     ~ScopedArena();
@@ -40,6 +41,32 @@ struct ScopedArena {
 
     ScopedArena(ScopedArena&&) = delete;
     ScopedArena& operator=(ScopedArena&&) = delete;
+};
+
+// RAII lease over one of the global scratch arenas (see |Arena::GetScratch|).
+// While alive it marks its arena as in-use, so any nested GetScratch() is guaranteed
+// to hand out a *different* arena. On destruction it resets the arena's offset and
+// releases it back to the pool.
+//
+// This is meant to be a call-stack variable ONLY: never move it, store it, or otherwise
+// extend its lifetime past its scope, or the arena stays leased and leaks out of the pool.
+struct ScratchArena {
+    Arena* Arena = nullptr;
+    u64 OriginalOffset = 0;
+
+    // Implicit conversion to Arena*. Lvalue-qualified so it can't be called on a temporary:
+    // `Printf(Arena::GetScratch(), ...)` is a use-after-reset bug, so make it a compile error.
+    // Bind the lease to a named variable first: `auto s = Arena::GetScratch(); Printf(s, ...)`.
+    operator struct Arena *() & { return Arena; }
+
+    explicit ScratchArena(struct Arena* arena);
+    ~ScratchArena();
+
+    ScratchArena(const ScratchArena&) = delete;
+    ScratchArena& operator=(const ScratchArena&) = delete;
+
+    ScratchArena(ScratchArena&&) = delete;
+    ScratchArena& operator=(ScratchArena&&) = delete;
 };
 
 struct Arena {
@@ -58,10 +85,15 @@ struct Arena {
 
     Arena* ParentArena = nullptr;
 
+    // True while this arena is leased out as a scratch arena (see |ScratchArena|).
+    bool _InUse = false;
+
     static Arena Allocate(StringView name, u64 size);
     static void Free(Arena* arena);
 
-    static ScopedArena GetScratch(Arena* conflict1 = nullptr, Arena* conflict2 = nullptr);
+    // Leases a scratch arena that is not currently in use by any live ScratchArena.
+    // The lease keeps it reserved for its lifetime, so nested calls never collide.
+    static ScratchArena GetScratch();
 
     // Use for testing.
     static std::span<Arena> ReferenceScratch();
