@@ -5,6 +5,7 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 cc_library(
     name = "core",
     srcs = [
+        "color.cpp",
         "defines.cpp",
         "filesystem.cpp",
         "math.cpp",
@@ -14,6 +15,7 @@ cc_library(
     hdrs = [
         "algorithm.h",
         "array.h",
+        "color.h",
         "container.h",
         "defines.h",
         "filesystem.h",
@@ -35,8 +37,10 @@ cc_test(
     name = "tests",
     srcs = [
         "container_test.cpp",
+        "filesystem_test.cpp",
         "function_test.cpp",
         "memory_test.cpp",
+        "string_test.cpp",
     ],
     testonly = True,
     size = "small",
