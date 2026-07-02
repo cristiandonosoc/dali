@@ -1,8 +1,8 @@
-#include <engine/core/string.h>
+#include <dali/core/string.h>
 
-#include <engine/core/memory.h>
-#include <engine/core/container.h>
-#include <engine/core/filesystem.h>
+#include <dali/core/memory.h>
+#include <dali/core/container.h>
+#include <dali/core/filesystem.h>
 
 #include <stb/stb_sprintf.h>
 

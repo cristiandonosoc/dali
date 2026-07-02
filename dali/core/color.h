@@ -1,7 +1,7 @@
 #pragma once
 
-#include <engine/core/defines.h>
-#include <engine/core/math.h>
+#include <dali/core/defines.h>
+#include <dali/core/math.h>
 
 namespace kdk {
 

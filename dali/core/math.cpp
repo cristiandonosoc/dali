@@ -1,6 +1,6 @@
-#include <engine/core/math.h>
+#include <dali/core/math.h>
 
-#include <engine/core/string.h>
+#include <dali/core/string.h>
 
 #include <SDL3/SDL_log.h>
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <engine/core/array.h>
-#include <engine/core/defines.h>
+#include <dali/core/array.h>
+#include <dali/core/defines.h>
 
 #include <cstring>
 #include <span>

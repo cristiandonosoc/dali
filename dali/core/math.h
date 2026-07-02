@@ -1,7 +1,7 @@
 #pragma once
 
-#include <engine/core/defines.h>
-#include <engine/core/string.h>
+#include <dali/core/defines.h>
+#include <dali/core/string.h>
 
 // Simple header that simplifies adding glm stuff.
 #include <glm/glm.hpp>

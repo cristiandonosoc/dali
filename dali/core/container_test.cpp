@@ -1,6 +1,6 @@
-#include <engine/core/container.h>
+#include <dali/core/container.h>
 
-#include <engine/core/memory.h>
+#include <dali/core/memory.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <optional>

@@ -12,13 +12,22 @@ said, it is already a custom game engine, so some complexity is inherent.
 ## Directory structure
 
 ```
-engine/     Engine code, game-agnostic where possible (memory, strings, math, rendering, etc.)
-  core/     Foundational types: defines, memory arenas, StringView, containers, algorithms
-game/       Game-specific code. Intended to grow much larger than engine/
+dali/       All first-party source. Includes are self-documenting: `#include <dali/core/string.h>`.
+  core/     Foundational, game-agnostic types shared by BOTH binaries: defines, memory arenas,
+            StringView, containers, algorithms, math. Depends on nothing above it.
+  platform/ Thin host executable — the port surface (rewrite this for a new OS/console). Owns
+            SDL, window, GL context, IO, threading, and game-DLL hot-reload. Depends on dali/core.
+  game/     The hot-reloadable DLL: engine systems + gameplay, all in one. Depends on dali/core
+            (and the platform↔game contract header). Intended to grow much larger than the rest.
 assets/     Art assets: textures, models, fonts, shaders (binary / authored files)
 data/       Game data: levels, scene files, config (engine-specific formats, e.g. YAML)
 third_party/ Vendored dependencies (do not modify)
 ```
+
+All first-party code lives under `dali/` so every include reads `<dali/...>`. The engine/game
+split from Kandinsky is intentionally collapsed: everything reloadable lives in `dali/game/`. The
+only boundary kept sharp is `dali/platform/` — it is both the port surface and the hot-reload
+surface (see Architecture decisions).
 
 ## Build system
 
@@ -76,7 +85,7 @@ public/private access sections. Trade-offs:
 A `.clang-format` file is in the root. Claude does not need to run it — formatting is handled
 separately.
 
-## Key types (engine/core)
+## Key types (dali/core)
 
 | Type | Description |
 |------|-------------|
@@ -90,7 +99,7 @@ separately.
 
 ## What has been ported so far
 
-- `engine/core`: defines, memory (arenas + block arenas), StringView, containers, algorithm,
+- `dali/core`: defines, memory (arenas + block arenas), StringView, containers, algorithm,
   function
 
 ## What still needs to come from Kandinsky

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <engine/core/defines.h>
+#include <dali/core/defines.h>
 
 namespace kdk {
 

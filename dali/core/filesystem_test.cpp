@@ -1,7 +1,7 @@
-#include <engine/core/filesystem.h>
+#include <dali/core/filesystem.h>
 
-#include <engine/core/memory.h>
-#include <engine/core/string.h>
+#include <dali/core/memory.h>
+#include <dali/core/string.h>
 
 #include <catch2/catch_test_macros.hpp>
 

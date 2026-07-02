@@ -1,6 +1,6 @@
-#include <engine/core/filesystem.h>
+#include <dali/core/filesystem.h>
 
-#include <engine/core/memory.h>
+#include <dali/core/memory.h>
 
 #include <SDL3/SDL_Log.h>
 

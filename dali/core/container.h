@@ -1,10 +1,10 @@
 #pragma once
 
-#include <engine/core/algorithm.h>
-#include <engine/core/array.h>
-#include <engine/core/defines.h>
-#include <engine/core/function.h>
-#include <engine/core/memory.h>
+#include <dali/core/algorithm.h>
+#include <dali/core/array.h>
+#include <dali/core/defines.h>
+#include <dali/core/function.h>
+#include <dali/core/memory.h>
 
 #include <cstddef>
 #include <span>

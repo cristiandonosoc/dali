@@ -1,7 +1,7 @@
 #pragma once
 
-#include <engine/core/algorithm.h>
-#include <engine/core/defines.h>
+#include <dali/core/algorithm.h>
+#include <dali/core/defines.h>
 
 #include <span>
 

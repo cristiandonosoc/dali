@@ -1,6 +1,6 @@
-#include <engine/core/memory.h>
+#include <dali/core/memory.h>
 
-#include <engine/core/container.h>
+#include <dali/core/container.h>
 
 #include <cstdlib>
 #include <cstring>
