@@ -107,6 +107,26 @@ See [kandinsky.md](kandinsky.md) for full detail. Rough porting order (to be dis
 - Gameplay layer (terrain, buildings, enemies, spawners, projectiles)
 - App harness / game DLL hot-reload
 
+## Architecture decisions
+
+Decisions made during the port (kept here so they're a recorded constraint, not tribal memory):
+
+- **GL calls go through the render layer, never sprinkled inline.** OpenGL is loaded with GLAD2
+  (`gl` 4.6 Core), generated *without* MX for now — the function table is global. If we later
+  enable MX (a second context, or to hoist the table into host-owned memory so it survives DLL
+  reload without re-loading), every call site would need the `GladGLContext`. Keeping GL access
+  funnelled through the render wrapper / uniform-setter layer means that switch — and a renderer
+  swap in general — stays a one-place change. New rendering code must follow this: no raw `glXxx`
+  in gameplay or engine code outside the render layer.
+
+- **GLAD is generated from the web generator (no pip/CLI dependency).** Options: `gl` 4.6 Core,
+  **alias** + **debug** on, everything else (header-only, loader, merge, mx, on-demand) off; loaded
+  via `gladLoadGL(SDL_GL_GetProcAddress)`. Extensions start empty and are added in the generator as
+  needed (additive — safe to regenerate), then guarded at runtime with the `GLAD_GL_<ext>` flag
+  (generation-time inclusion ≠ driver support). The committed `gl.c`/`gl.h` are self-documenting,
+  but regeneration overwrites them, so the reproducible recipe is the generator **permalink**, kept
+  here: `<paste permalink after first generation>`.
+
 ## Unspecified / deferred topics
 
 The following are intentionally left open and will be decided as the port progresses:

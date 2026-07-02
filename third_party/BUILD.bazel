@@ -7,9 +7,9 @@ cc_library(
 )
 
 cc_library(
-    name = "glew",
+    name = "glad",
     visibility = ["//visibility:public"],
-    deps = ["//third_party/glew-2.2.0:lib"],
+    deps = ["//third_party/glad:lib"],
 )
 
 cc_library(
