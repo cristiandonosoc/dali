@@ -1,0 +1,112 @@
+#pragma once
+
+#include <dali/core/memory.h>
+#include <dali/core/string.h>
+
+#include <span>
+
+namespace kdk {
+
+// The platform<->game contract. Included by BOTH the platform exe and the game DLL. No
+// implementation lives here: types and function-pointer typedefs only, so it never drags SDL, GL
+// or <windows.h> into either binary.
+
+// PLATFORM ----------------------------------------------------------------------------------------
+
+struct Window
+{
+    FixedString<128> Name = {};
+    i32 Width = 0;
+    i32 Height = 0;
+
+    // Opaque handle to the platform's window object (SDL_Window* under the hood).
+    void* PlatformData = nullptr;
+};
+
+struct FileContents
+{
+    std::span<u8> Data = {};
+    bool IsValid() const { return Data.data() != nullptr; }
+};
+
+// Services the platform provides to the game. Plain function pointers (not virtuals): the struct is
+// a POD filled in by the platform, so it crosses the DLL boundary with no vtable coupling and a
+// reload never invalidates it.
+struct PlatformAPI
+{
+    // Reads a whole file into |arena|. Invalid FileContents on failure.
+    FileContents (*ReadFile)(Arena* arena, StringView path) = nullptr;
+    bool (*WriteFile)(StringView path, std::span<const u8> data) = nullptr;
+
+    // Appends one line to the platform log.
+    void (*Log)(StringView message) = nullptr;
+
+    // Resolves a GL entry point (wraps SDL_GL_GetProcAddress). The game's GL loader calls this from
+    // OnSOLoaded to rebuild its function table after a reload.
+    void* (*GLGetProcAddress)(const char* name) = nullptr;
+};
+
+// Host-owned memory. Lives in the platform exe, so it survives DLL reloads untouched.
+struct PlatformMemory
+{
+    // The game allocates its GameState here; persists across reloads.
+    Arena PermanentArena = {};
+    // Reset by the platform every frame.
+    Arena FrameArena = {};
+};
+
+// The single handle the platform passes to the game on every entry point. Everything that must
+// outlive a DLL reload is reachable from here, so reloading the game image loses nothing.
+struct PlatformState
+{
+    PlatformAPI API = {};
+    PlatformMemory Memory = {};
+
+    // The main window, created and owned by the platform.
+    Window* MainWindow = nullptr;
+
+    // The game's root state. Allocated once by OnGameInit into Memory.PermanentArena; opaque here.
+    void* GameState = nullptr;
+
+    // Frame timing.
+    f64 TotalSeconds = 0.0;
+    f32 DeltaSeconds = 0.0f;
+
+    // The game clears this to request shutdown.
+    bool Running = true;
+};
+
+// GAME API ----------------------------------------------------------------------------------------
+//
+// The entry points the game DLL exports. The platform resolves them by name after LoadLibrary; the
+// KDK_*_NAME strings must match the exported symbols in game.cpp.
+
+#define KDK_ON_GAME_INIT_NAME "OnGameInit"
+#define KDK_ON_GAME_UPDATE_NAME "OnGameUpdate"
+#define KDK_ON_GAME_RENDER_NAME "OnGameRender"
+#define KDK_ON_SO_LOADED_NAME "OnSOLoaded"
+#define KDK_ON_SO_UNLOADED_NAME "OnSOUnloaded"
+
+// The export contract, spelled out: the exact set of functions the game DLL must export, their
+// signatures, and (via the KDK_*_NAME strings above, which match these member names) their symbol
+// names. Only the platform ever instantiates this — it resolves each pointer after load and holds
+// the table in its GameLibrary. The OS module handle and reload timestamp are platform-only
+// concerns and live in that wrapper (dali/platform/game_library.h), not here.
+struct LoadedGameSO
+{
+    // Called once, after memory and window are ready. Allocates GameState into PermanentArena.
+    bool (*OnGameInit)(PlatformState*) = nullptr;
+    // Advances the simulation one frame.
+    bool (*OnGameUpdate)(PlatformState*) = nullptr;
+    // Renders one frame.
+    bool (*OnGameRender)(PlatformState*) = nullptr;
+    // Called immediately after every (re)load. Re-sync process-global state a fresh DLL image lost:
+    // GL function table, ImGui context, etc.
+    bool (*OnSOLoaded)(PlatformState*) = nullptr;
+    // Called immediately before the DLL is unloaded for a reload. Tear down what OnSOLoaded set up.
+    bool (*OnSOUnloaded)(PlatformState*) = nullptr;
+
+    bool IsValid() const;
+};
+
+}  // namespace kdk

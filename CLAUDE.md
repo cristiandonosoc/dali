@@ -54,6 +54,17 @@ bazel build //...     # build without running tests
 - X macros used heavily for type registration (entity types, component types, asset types)
 - Arena-based allocation — prefer `Arena*` + member methods (e.g. `arena->Push`) over `new`/`delete`
 - No comments unless the WHY is non-obvious
+- No anonymous namespaces. File-local helpers go in a `<name_of_file>_private` namespace instead
+  (`game_library.cpp` → `game_library_private`), so the translation unit is named at the call site:
+
+  ```cpp
+  namespace game_library_private {
+
+  } // namespace game_library_private
+  ```
+- `using namespace` only inside a function body, never at file/namespace scope. A TU-scope
+  `using` leaks its names into whatever else shares the TU under a unity build, which we may want
+  to support one day — keep the effect local to the function.
 
 ### Struct layout
 

@@ -4,7 +4,9 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 cc_library(
     name = "core",
+    visibility = ["//dali:__subpackages__"],
     srcs = [
+        "api.cpp",
         "color.cpp",
         "defines.cpp",
         "filesystem.cpp",
@@ -14,6 +16,7 @@ cc_library(
     ],
     hdrs = [
         "algorithm.h",
+        "api.h",
         "array.h",
         "color.h",
         "container.h",
