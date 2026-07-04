@@ -3,7 +3,6 @@
 #include <dali/core/memory.h>
 
 #include <catch2/catch_test_macros.hpp>
-#include <optional>
 
 using namespace kdk;
 
@@ -1297,14 +1296,6 @@ TEST_CASE("DynArray const operations", "[dynarray]") {
         // constArray.Push(30);  // Should not compile
     }
 }
-
-static_assert(sizeof(Optional<u8>) == sizeof(std::optional<u8>));
-static_assert(sizeof(Optional<u16>) == sizeof(std::optional<u16>));
-static_assert(sizeof(Optional<u32>) == sizeof(std::optional<u32>));
-static_assert(sizeof(Optional<u64>) == sizeof(std::optional<u64>));
-static_assert(sizeof(Optional<f32>) == sizeof(std::optional<f32>));
-static_assert(sizeof(Optional<f64>) == sizeof(std::optional<f64>));
-static_assert(sizeof(Optional<void*>) == sizeof(std::optional<void*>));
 
 TEST_CASE("FixedVector Slice operations", "[FixedVector]") {
     SECTION("Slice middle portion") {

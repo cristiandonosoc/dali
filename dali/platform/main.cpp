@@ -77,6 +77,8 @@ bool InitPlatform(PlatformState* ps) {
 void ShutdownPlatform(PlatformState* ps) {
     Arena::Free(ps->Memory.FrameArena.GetPtr());
     Arena::Free(ps->Memory.PermanentArena.GetPtr());
+
+	// TODO(cdc): Do window shutdown
 }
 
 }  // namespace kdk::main_private

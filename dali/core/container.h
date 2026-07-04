@@ -16,60 +16,6 @@ std::span<T> MakeSpan(T& t) {
     return {&t, 1};
 }
 
-// MSVC STL implementation of std::optional just shoves a bool in there, so it's not particularly
-// special, so for now we implement our own to avoid bringing that header.
-// See container_test for some static_assets.
-template <typename T>
-struct Optional {
-    T _Value;
-    bool _HasValue;
-
-    Optional() : _HasValue(false) {}  // Don't construct _Value in this case.
-    Optional(const T& value) : _Value(value), _HasValue(true) {}
-    Optional(T&& value) : _Value(std::move(value)), _HasValue(true) {}
-
-    // No copy constructor/assignment
-    Optional(const Optional&) = delete;
-    Optional& operator=(const Optional&) = delete;
-
-    // Move constructor/assignment
-    Optional(Optional&& other) noexcept
-        : _Value(std::move(other._Value)), _HasValue(other._HasValue) {
-        other._HasValue = false;
-    }
-
-    Optional& operator=(Optional&& other) noexcept {
-        if (this != &other) {
-            _Value = std::move(other._Value);
-            _HasValue = other._HasValue;
-            other._HasValue = false;
-        }
-        return *this;
-    }
-
-    explicit operator bool() const { return _HasValue; }
-    bool HasValue() const { return _HasValue; }
-
-    // T& GetValue() {
-    //     ASSERT(_HasValue);
-    //     return _Value;
-    // }
-    const T& GetValue() const {
-        ASSERT(_HasValue);
-        return _Value;
-    }
-    // T* operator->() {
-    //     ASSERT(_HasValue);
-    //     return &_Value;
-    // }
-    const T* operator->() const {
-        ASSERT(_HasValue);
-        return &_Value;
-    }
-
-    void Reset() { _HasValue = false; }
-};
-
 // FixedVector -------------------------------------------------------------------------------------
 
 template <typename T, i32 N>
