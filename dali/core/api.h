@@ -59,11 +59,13 @@ struct PlatformMemory
 // outlive a DLL reload is reachable from here, so reloading the game image loses nothing.
 struct PlatformState
 {
+	FixedString<128> BasePath;
+
     PlatformAPI API = {};
     PlatformMemory Memory = {};
 
     // The main window, created and owned by the platform.
-    Window* MainWindow = nullptr;
+    Window MainWindow = {};
 
     // The game's root state. Allocated once by OnGameInit into Memory.PermanentArena; opaque here.
     void* GameState = nullptr;

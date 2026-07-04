@@ -3,7 +3,7 @@
 ## Project overview
 
 Dali is a tower defense game built on a custom C++ engine. The engine is a port and improvement of
-[Kandinsky](../kandinsky), a previous engine by the same author. See [kandinsky.md](kandinsky.md)
+[Kandinsky](../kandinsky), a previous engine by the same author. See [kandinsky.md](docs/kandinsky.md)
 for a full reference of that codebase — most of what Dali needs comes from there.
 
 The goal is to keep the code fun and interesting without being gratuitously over-engineered. That
