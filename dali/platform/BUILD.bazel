@@ -17,13 +17,16 @@ cc_library(
     srcs = [
         "arg_parser.cpp",
         "game_library.cpp",
+        "platform.cpp",
     ],
     hdrs = [
         "arg_parser.h",
         "game_library.h",
+        "platform.h",
     ],
     deps = [
         "//dali/core",
+        "//third_party:glad",
         "//third_party:sdl3",
     ],
 )

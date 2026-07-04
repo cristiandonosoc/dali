@@ -26,5 +26,6 @@ CompileFlags:
     "-isystem", "third_party/yaml-cpp-0.8.0/include",
     "-isystem", "third_party/b64.c-master",
     "-isystem", "third_party/nativefiledialog-extended-1.2.1/src/include",
+    "-isystem", "third_party/glad/include",
     "-isystem", "extras/includes",
   ]
