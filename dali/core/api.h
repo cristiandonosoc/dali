@@ -13,6 +13,13 @@ namespace kdk {
 
 // PLATFORM ----------------------------------------------------------------------------------------
 
+enum class ELogSeverity : u8 {
+    Info,
+    Warning,
+    Error,
+};
+StringView ToString(ELogSeverity severity);
+
 struct Window
 {
     FixedString<128> Name = {};
@@ -39,7 +46,7 @@ struct PlatformAPI
     bool (*WriteFile)(StringView path, std::span<const u8> data) = nullptr;
 
     // Appends one line to the platform log.
-    void (*Log)(StringView message) = nullptr;
+    void (*Log)(ELogSeverity severity, StringView message) = nullptr;
 
     // Resolves a GL entry point (wraps SDL_GL_GetProcAddress). The game's GL loader calls this from
     // OnSOLoaded to rebuild its function table after a reload.

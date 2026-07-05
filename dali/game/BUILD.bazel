@@ -1,4 +1,21 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "lib",
+    srcs = [
+        "log.cpp",
+        "platform_state.cpp",
+    ],
+    hdrs = [
+        "log.h",
+        "platform_state.h",
+    ],
+    visibility = ["//dali:__subpackages__"],
+    deps = [
+        "//dali/core",
+    ],
+)
 
 # The hot-reloadable game DLL. linkshared makes this a shared library; the platform loads it by
 # path at runtime (SDL_LoadObject), so nothing build-depends on it.
@@ -10,6 +27,7 @@ cc_binary(
     linkshared = True,
     visibility = ["//dali:__subpackages__"],
     deps = [
+        ":lib",
         "//dali/core",
     ],
 )

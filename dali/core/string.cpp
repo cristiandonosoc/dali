@@ -146,13 +146,19 @@ StringView RemovePrefix(Arena* arena, StringView path, StringView prefix) {
 // Printf ------------------------------------------------------------------------------------------
 
 StringView Printf(Arena* arena, const char* fmt, ...) {
+    va_list va;
+    va_start(va, fmt);
+    StringView result = PrintfV(arena, fmt, va);
+    va_end(va);
+
+    return result;
+}
+
+StringView PrintfV(Arena* arena, const char* fmt, va_list args) {
     int size = 4 * STB_SPRINTF_MIN;
     auto data = arena->Push(size);
     char* buf = (char*)data.data();
-    va_list va;
-    va_start(va, fmt);
-    int len = stbsp_vsnprintf(buf, size, fmt, va);
-    va_end(va);
+    int len = stbsp_vsnprintf(buf, size, fmt, args);
 
     return StringView(buf, len);
 }

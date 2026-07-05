@@ -22,6 +22,10 @@ struct WindowPlatformData {
     SDL_GLContext GLContext = nullptr;
 };
 
+void Log(ELogSeverity severity, StringView message) {
+    SDL_Log("[%s] %s", ToString(severity), message.Str());
+}
+
 bool InitWindow(PlatformState* ps) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         SDL_Log("ERROR: Initializing SDL: %s\n", SDL_GetError());
@@ -101,6 +105,8 @@ void ShutdownWindow(PlatformState* ps) {
 
 bool InitPlatform(PlatformState* ps) {
     using namespace platform_private;
+
+    ps->API.Log = Log;
 
     auto scratch = Arena::GetScratch();
     ps->BasePath = paths::GetBaseDir(scratch);

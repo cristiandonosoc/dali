@@ -1,4 +1,5 @@
 #include <dali/core/api.h>
+#include <dali/game/platform_state.h>
 
 #include <cstdio>
 
@@ -28,7 +29,7 @@ KDK_API bool OnGameRender(kdk::PlatformState* ps) {
 }
 
 KDK_API bool OnSOLoaded(kdk::PlatformState* ps) {
-    (void)ps;
+    kdk::SetGlobalPlatformState(ps);
     printf("[game] OnSOLoaded\n");
     return true;
 }
@@ -36,6 +37,7 @@ KDK_API bool OnSOLoaded(kdk::PlatformState* ps) {
 KDK_API bool OnSOUnloaded(kdk::PlatformState* ps) {
     (void)ps;
     printf("[game] OnSOUnloaded\n");
+    kdk::SetGlobalPlatformState(nullptr);
     return true;
 }
 

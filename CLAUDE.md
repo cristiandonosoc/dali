@@ -147,6 +147,16 @@ Decisions made during the port (kept here so they're a recorded constraint, not 
   but regeneration overwrites them, so the reproducible recipe is the generator **permalink**, kept
   here: `<paste permalink after first generation>`.
 
+- **`PlatformState` is globally accessible from the game DLL via `GetGlobalPlatformState()` /
+  `SetGlobalPlatformState()` (`dali/game/platform_state.h`), rebound on every `OnSOLoaded` and
+  cleared on `OnSOUnloaded`.** Rationale: almost everything hanging off `PlatformState` (memory
+  arenas, file IO, logging) is infrastructure that's the same for the whole process — threading it
+  explicitly through every leaf call bought nothing. This mirrors a pattern Kandinsky already used
+  (`platform::GetPlatformContext()`/`SetPlatformContext()`). The line we're keeping: infrastructure
+  on `PlatformState` is ambient; domain/gameplay state hanging off `PlatformState::GameState` (e.g.
+  a future `World`) is still passed explicitly, so it stays independently testable/instantiable.
+  `LogError`/`LogWarning`/`Log` (`dali/game/log.h`) are the first thing built on top of this.
+
 ## Unspecified / deferred topics
 
 The following are intentionally left open and will be decided as the port progresses:
@@ -154,4 +164,6 @@ The following are intentionally left open and will be decided as the port progre
 - Specifics of the tower defense game (mechanics, levels, art style)
 - Whether to keep OpenGL or switch renderers
 - Final shape of the entity/component architecture (may differ from Kandinsky)
+- Thread-safety of `GetGlobalPlatformState()`/`SetGlobalPlatformState()` — currently assumes a
+  single-threaded game DLL; revisit if a job system or async loading is introduced
 - Any other architectural decisions that arise during porting

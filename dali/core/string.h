@@ -3,6 +3,7 @@
 #include <dali/core/array.h>
 #include <dali/core/defines.h>
 
+#include <cstdarg>
 #include <cstring>
 #include <span>
 #include <string_view>
@@ -140,6 +141,7 @@ StringView RemovePrefix(Arena* arena, StringView path, StringView prefix);
 // Printf ------------------------------------------------------------------------------------------
 
 [[nodiscard]] StringView Printf(Arena* arena, const char* fmt, ...);
+[[nodiscard]] StringView PrintfV(Arena* arena, const char* fmt, va_list args);
 StringView ToString(Arena* arena, const std::source_location& location);
 
 void PrintBacktrace(Arena* arena, u32 frames_to_skip = 0);
