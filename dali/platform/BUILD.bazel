@@ -28,6 +28,7 @@ cc_library(
         "//dali/core",
         "//third_party:glad",
         "//third_party:sdl3",
+        "//third_party:imgui_sdl3_opengl3",
     ],
 )
 

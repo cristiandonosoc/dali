@@ -7,6 +7,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <imgui.h>
+#include <imgui_impl_opengl3.h>
+#include <imgui_impl_sdl3.h>
+
 namespace kdk {
 
 namespace platform_private {
@@ -23,7 +27,7 @@ struct WindowPlatformData {
 };
 
 void Log(ELogSeverity severity, StringView message) {
-    SDL_Log("[%s] %s", ToString(severity), message.Str());
+    SDL_Log("[%s] %s", ToString(severity).Str(), message.Str());
 }
 
 bool InitWindow(PlatformState* ps) {
@@ -101,6 +105,41 @@ void ShutdownWindow(PlatformState* ps) {
     ps->MainWindow.PlatformData = nullptr;
 }
 
+void* ImguiMalloc(size_t size, void*) { return malloc(size); }
+void ImguiFree(void* ptr, void*) { free(ptr); }
+
+bool InitImGui(PlatformState* ps) {
+    // Setup Dear ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;   // Enable Gamepad Controls
+
+    // Setup Dear ImGui style
+    ImGui::StyleColorsDark();
+    // ImGui::StyleColorsLight();
+
+    // Setup Platform/Renderer backends
+	auto* platform_data = (WindowPlatformData*)ps->MainWindow.PlatformData;
+    ImGui_ImplSDL3_InitForOpenGL(platform_data->SDLWindow, platform_data->GLContext);
+    ImGui_ImplOpenGL3_Init(nullptr);  // Let the platform decide version.
+
+    ps->ImGuiState.Context = ImGui::GetCurrentContext();
+    ps->ImGuiState.AllocFunc = ImguiMalloc;
+    ps->ImGuiState.FreeFunc = ImguiFree;
+
+    return true;
+}
+
+void ShutdownImGui(PlatformState*) {
+    // Cleanup
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+}
+
 }  // namespace platform_private
 
 bool InitPlatform(PlatformState* ps) {
@@ -120,11 +159,19 @@ bool InitPlatform(PlatformState* ps) {
         return false;
     }
 
+	if (!InitImGui(ps)) {
+		SDL_Log("ERROR: Init ImGui");
+		return false;
+	}
+
     return true;
 }
 
 void ShutdownPlatform(PlatformState* ps) {
-    platform_private::ShutdownWindow(ps);
+	using namespace platform_private;
+
+	ShutdownImGui(ps);
+    ShutdownWindow(ps);
 
     Arena::Free(ps->Memory.FrameArena.GetPtr());
     Arena::Free(ps->Memory.PermanentArena.GetPtr());

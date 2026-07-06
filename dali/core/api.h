@@ -1,5 +1,6 @@
 #pragma once
 
+#include <dali/core/defines.h>
 #include <dali/core/memory.h>
 #include <dali/core/string.h>
 
@@ -20,8 +21,7 @@ enum class ELogSeverity : u8 {
 };
 StringView ToString(ELogSeverity severity);
 
-struct Window
-{
+struct Window {
     FixedString<128> Name = {};
     i32 Width = 0;
     i32 Height = 0;
@@ -30,8 +30,7 @@ struct Window
     void* PlatformData = nullptr;
 };
 
-struct FileContents
-{
+struct FileContents {
     std::span<u8> Data = {};
     bool IsValid() const { return Data.data() != nullptr; }
 };
@@ -39,8 +38,7 @@ struct FileContents
 // Services the platform provides to the game. Plain function pointers (not virtuals): the struct is
 // a POD filled in by the platform, so it crosses the DLL boundary with no vtable coupling and a
 // reload never invalidates it.
-struct PlatformAPI
-{
+struct PlatformAPI {
     // Reads a whole file into |arena|. Invalid FileContents on failure.
     FileContents (*ReadFile)(Arena* arena, StringView path) = nullptr;
     bool (*WriteFile)(StringView path, std::span<const u8> data) = nullptr;
@@ -54,22 +52,30 @@ struct PlatformAPI
 };
 
 // Host-owned memory. Lives in the platform exe, so it survives DLL reloads untouched.
-struct PlatformMemory
-{
+struct PlatformMemory {
     // The game allocates its GameState here; persists across reloads.
     Arena PermanentArena = {};
     // Reset by the platform every frame.
     Arena FrameArena = {};
 };
 
+struct PlatformImGuiState {
+    using ImGuiMemAllocFunc = void* (*)(size_t size, void* user_data);
+    using ImGuiMemFreeFunc = void (*)(void* ptr, void* user_data);
+
+    void* Context = nullptr;
+    ImGuiMemAllocFunc AllocFunc = nullptr;
+    ImGuiMemFreeFunc FreeFunc = nullptr;
+};
+
 // The single handle the platform passes to the game on every entry point. Everything that must
 // outlive a DLL reload is reachable from here, so reloading the game image loses nothing.
-struct PlatformState
-{
-	FixedString<128> BasePath;
+struct PlatformState {
+    FixedString<128> BasePath;
 
     PlatformAPI API = {};
     PlatformMemory Memory = {};
+    PlatformImGuiState ImGuiState = {};
 
     // The main window, created and owned by the platform.
     Window MainWindow = {};
@@ -101,8 +107,7 @@ struct PlatformState
 // names. Only the platform ever instantiates this — it resolves each pointer after load and holds
 // the table in its GameLibrary. The OS module handle and reload timestamp are platform-only
 // concerns and live in that wrapper (dali/platform/game_library.h), not here.
-struct LoadedGameSO
-{
+struct LoadedGameSO {
     // Called once, after memory and window are ready. Allocates GameState into PermanentArena.
     bool (*OnGameInit)(PlatformState*) = nullptr;
     // Advances the simulation one frame.

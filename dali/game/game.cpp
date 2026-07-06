@@ -1,6 +1,8 @@
 #include <dali/core/api.h>
 #include <dali/game/platform_state.h>
 
+#include <imgui.h>
+
 #include <cstdio>
 
 // The hot-reloadable game DLL. For now every entry point just prints, so we can verify the
@@ -30,14 +32,19 @@ KDK_API bool OnGameRender(kdk::PlatformState* ps) {
 
 KDK_API bool OnSOLoaded(kdk::PlatformState* ps) {
     kdk::SetGlobalPlatformState(ps);
+
+    ImGui::SetCurrentContext((ImGuiContext*)ps->ImGuiState.Context);
+    ImGui::SetAllocatorFunctions(ps->ImGuiState.AllocFunc, ps->ImGuiState.FreeFunc);
+
     printf("[game] OnSOLoaded\n");
     return true;
 }
 
 KDK_API bool OnSOUnloaded(kdk::PlatformState* ps) {
     (void)ps;
-    printf("[game] OnSOUnloaded\n");
     kdk::SetGlobalPlatformState(nullptr);
+
+    printf("[game] OnSOUnloaded\n");
     return true;
 }
 
