@@ -26,7 +26,16 @@ KDK_API bool OnGameUpdate(kdk::PlatformState* ps) {
 
 KDK_API bool OnGameRender(kdk::PlatformState* ps) {
     (void)ps;
-    printf("[game] OnGameRender\n");
+
+    // ImGui UI is submitted here (between the platform's NewFrame and Render). Draw data is
+    // finalized and rendered by the platform in PlatformEndFrame.
+    ImGui::ShowDemoWindow();
+
+    ImGui::Begin("Dali");
+    ImGui::Text("Hello from the game DLL");
+    ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
+    ImGui::End();
+
     return true;
 }
 

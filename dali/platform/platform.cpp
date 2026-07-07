@@ -296,7 +296,25 @@ EPlatformFrameResponse PlatformBeginFrame(PlatformState* ps) {
     return EPlatformFrameResponse::Continue;
 }
 
-void PlatformEndFrame(PlatformState*) { ImGui::EndFrame(); }
+void PlatformEndFrame(PlatformState* ps) {
+    using namespace platform_private;
+
+    auto* platform_data = (WindowPlatformData*)ps->MainWindow.PlatformData;
+
+    // Finalizes this frame's ImGui draw data (calls ImGui::EndFrame internally).
+    ImGui::Render();
+
+    // TODO(cdc): Clear/viewport belong in the render layer once it exists — raw GL here is
+    // bootstrapping so ImGui has a defined backbuffer to draw onto. See CLAUDE.md render-layer rule.
+    glViewport(0, 0, ps->MainWindow.Width, ps->MainWindow.Height);
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // The game's OnGameRender will eventually draw the scene here, before ImGui composites on top.
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+    SDL_GL_SwapWindow(platform_data->SDLWindow);
+}
 
 // API ---------------------------------------------------------------------------------------------
 
