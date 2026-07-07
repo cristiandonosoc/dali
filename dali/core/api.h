@@ -68,6 +68,18 @@ struct PlatformImGuiState {
     ImGuiMemFreeFunc FreeFunc = nullptr;
 };
 
+struct PlatformTimeTracking {
+    // The cpu ticks at the moment this time tracking was started.
+    u64 StartFrameTicks = 0;
+	u64 LastFrameTicks = 0;
+    // How much time we have been paused, which have to be offseted.
+    double PauseOffsetSeconds = 0;
+
+    double DeltaSeconds = 0;
+    double TotalSeconds = 0;
+};
+
+
 // The single handle the platform passes to the game on every entry point. Everything that must
 // outlive a DLL reload is reachable from here, so reloading the game image loses nothing.
 struct PlatformState {
@@ -76,6 +88,7 @@ struct PlatformState {
     PlatformAPI API = {};
     PlatformMemory Memory = {};
     PlatformImGuiState ImGuiState = {};
+	PlatformTimeTracking TimeTracking = {};
 
     // The main window, created and owned by the platform.
     Window MainWindow = {};

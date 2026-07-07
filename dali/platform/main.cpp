@@ -49,19 +49,31 @@ int main(int argc, const char* argv[]) {
         return -1;
     }
 
-    if (!InitPlatform(gPlatformState)) {
+    if (!PlatformInit(gPlatformState)) {
         return -1;
     }
 
     // Verify the load-and-call flow: init once, then a few update/render ticks, then unload.
     gl.SO.OnGameInit(gPlatformState);
+
     for (int i = 0; i < 10; ++i) {
+		DEFER { PlatformEndFrame(gPlatformState); };
+
+        // TODO(cdc): Do hot-reloading here.
+        EPlatformFrameResponse response = PlatformBeginFrame(gPlatformState);
+		if (response == EPlatformFrameResponse::QuitRequested) {
+			SDL_Log("Quit Requested!");
+			break;
+		}
+
         gl.SO.OnGameUpdate(gPlatformState);
         gl.SO.OnGameRender(gPlatformState);
-		SDL_Delay(1000);
+
+        SDL_Delay(1000);
     }
+
     gl.Unload(gPlatformState);
-    ShutdownPlatform(gPlatformState);
+    PlatformShutdown(gPlatformState);
 
     free(gPlatformState);
     return 0;

@@ -109,8 +109,10 @@ void* ImguiMalloc(size_t size, void*) { return malloc(size); }
 void ImguiFree(void* ptr, void*) { free(ptr); }
 
 bool InitImGui(PlatformState* ps) {
-    // Setup Dear ImGui context
+    // Setup Dear ImGui context. Set allocators before CreateContext so the platform's context is
+    // allocated with the same functions the game will free through after a reload.
     IMGUI_CHECKVERSION();
+    ImGui::SetAllocatorFunctions(ImguiMalloc, ImguiFree);
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
@@ -122,7 +124,7 @@ bool InitImGui(PlatformState* ps) {
     // ImGui::StyleColorsLight();
 
     // Setup Platform/Renderer backends
-	auto* platform_data = (WindowPlatformData*)ps->MainWindow.PlatformData;
+    auto* platform_data = (WindowPlatformData*)ps->MainWindow.PlatformData;
     ImGui_ImplSDL3_InitForOpenGL(platform_data->SDLWindow, platform_data->GLContext);
     ImGui_ImplOpenGL3_Init(nullptr);  // Let the platform decide version.
 
@@ -142,7 +144,7 @@ void ShutdownImGui(PlatformState*) {
 
 }  // namespace platform_private
 
-bool InitPlatform(PlatformState* ps) {
+bool PlatformInit(PlatformState* ps) {
     using namespace platform_private;
 
     ps->API.Log = Log;
@@ -159,22 +161,79 @@ bool InitPlatform(PlatformState* ps) {
         return false;
     }
 
-	if (!InitImGui(ps)) {
-		SDL_Log("ERROR: Init ImGui");
-		return false;
-	}
+    if (!InitImGui(ps)) {
+        SDL_Log("ERROR: Init ImGui");
+        return false;
+    }
 
     return true;
 }
 
-void ShutdownPlatform(PlatformState* ps) {
-	using namespace platform_private;
+void PlatformShutdown(PlatformState* ps) {
+    using namespace platform_private;
 
-	ShutdownImGui(ps);
+    ShutdownImGui(ps);
     ShutdownWindow(ps);
 
     Arena::Free(ps->Memory.FrameArena.GetPtr());
     Arena::Free(ps->Memory.PermanentArena.GetPtr());
 }
+
+namespace platform_private {
+
+// Returns whether a quit has been asked or not.
+bool PollWindowEvents(PlatformState*) {
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        ImGui_ImplSDL3_ProcessEvent(&event);
+
+        switch (event.type) {
+            case SDL_EVENT_QUIT:
+                return true;
+                // TODO(cdc): Implement other event types.
+        }
+    }
+
+    return false;
+}
+
+}  // namespace platform_private
+
+EPlatformFrameResponse PlatformBeginFrame(PlatformState* ps) {
+    using namespace platform_private;
+
+    // Update time tracking.
+    {
+        auto* tt = &ps->TimeTracking;
+        u64 current_frame_ticks = GetCPUTicks();
+
+        tt->TotalSeconds = (current_frame_ticks - tt->StartFrameTicks) / 1'000'000'000.0f;
+        tt->TotalSeconds -= tt->PauseOffsetSeconds;
+
+        if (tt->LastFrameTicks != 0) [[unlikely]] {
+            u64 delta_ticks = current_frame_ticks - tt->LastFrameTicks;
+            // Transform to seconds.
+            tt->DeltaSeconds = (double)(delta_ticks) / 1'000'000'000.0f;
+        }
+
+        tt->LastFrameTicks = current_frame_ticks;
+    }
+
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+
+    if (PollWindowEvents(ps)) {
+        return EPlatformFrameResponse::QuitRequested;
+    }
+
+    return EPlatformFrameResponse::Continue;
+}
+
+void PlatformEndFrame(PlatformState*) { ImGui::EndFrame(); }
+
+// API ---------------------------------------------------------------------------------------------
+
+u64 GetCPUTicks() { return SDL_GetTicksNS(); }
 
 }  // namespace kdk
