@@ -1,6 +1,7 @@
 #pragma once
 
 #include <dali/core/defines.h>
+#include <dali/core/input.h>
 #include <dali/core/memory.h>
 #include <dali/core/string.h>
 
@@ -89,6 +90,7 @@ struct PlatformState {
     PlatformMemory Memory = {};
     PlatformImGuiState ImGuiState = {};
 	PlatformTimeTracking TimeTracking = {};
+    InputState Input = {};
 
     // The main window, created and owned by the platform.
     Window MainWindow = {};

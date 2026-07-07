@@ -181,20 +181,86 @@ void PlatformShutdown(PlatformState* ps) {
 
 namespace platform_private {
 
-// Returns whether a quit has been asked or not.
-bool PollWindowEvents(PlatformState*) {
+// EKey/EMouseButton mirror the SDL codes 1:1, so the poll loop below indexes the input bitsets with
+// the raw SDL values and needs no translation table. Verify that mirroring here — this is the one TU
+// that sees both dali/core/input.h and <SDL3/SDL.h>. If any of these fire, the enum in input.h has
+// drifted from SDL and must be fixed.
+static_assert(kKeyCount == SDL_SCANCODE_COUNT);
+static_assert((u32)EKey::W == SDL_SCANCODE_W);
+static_assert((u32)EKey::Space == SDL_SCANCODE_SPACE);
+static_assert((u32)EKey::Escape == SDL_SCANCODE_ESCAPE);
+static_assert((u32)EKey::LCtrl == SDL_SCANCODE_LCTRL);
+static_assert((u32)EKey::Up == SDL_SCANCODE_UP);
+static_assert((u32)EMouseButton::Left == SDL_BUTTON_LEFT);
+static_assert((u32)EMouseButton::Right == SDL_BUTTON_RIGHT);
+static_assert((u32)EMouseButton::X2 == SDL_BUTTON_X2);
+
+// Returns whether a quit has been asked or not. Also drives InputState for the frame: per-frame
+// edges (pressed/released, scroll, move) are cleared up front, held level (down) persists.
+bool PollWindowEvents(PlatformState* ps) {
+    auto* input = &ps->Input;
+
+    input->KeyPressed.reset();
+    input->KeyReleased.reset();
+    input->MousePressed.reset();
+    input->MouseReleased.reset();
+    input->MouseScroll = {};
+
+    bool got_motion = false;
+    bool quit = false;
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         ImGui_ImplSDL3_ProcessEvent(&event);
 
         switch (event.type) {
-            case SDL_EVENT_QUIT:
-                return true;
-                // TODO(cdc): Implement other event types.
+            case SDL_EVENT_QUIT: quit = true; break;
+
+            case SDL_EVENT_KEY_DOWN:
+                if (!event.key.repeat) {
+                    input->KeyPressed[event.key.scancode] = true;
+                    input->KeyDown[event.key.scancode] = true;
+                }
+                break;
+            case SDL_EVENT_KEY_UP:
+                input->KeyReleased[event.key.scancode] = true;
+                input->KeyDown[event.key.scancode] = false;
+                break;
+
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                input->MousePressed[event.button.button] = true;
+                input->MouseDown[event.button.button] = true;
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+                input->MouseReleased[event.button.button] = true;
+                input->MouseDown[event.button.button] = false;
+                break;
+
+            case SDL_EVENT_MOUSE_MOTION:
+                got_motion = true;
+                input->MousePosition = {event.motion.x, event.motion.y};
+                input->MousePositionGL = {event.motion.x, ps->MainWindow.Height - event.motion.y};
+                input->MouseMove = {event.motion.xrel, event.motion.yrel};
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                input->MouseScroll.x += event.wheel.x;
+                input->MouseScroll.y += event.wheel.y;
+                break;
+
+                // TODO(cdc): Window resize, focus, text input, etc.
         }
     }
 
-    return false;
+    if (!got_motion) {
+        input->MouseMove = {};
+    }
+
+    // ImGui::NewFrame() already ran this frame (PlatformBeginFrame), so WantCapture* is valid.
+    ImGuiIO& io = ImGui::GetIO();
+    input->KeyboardOverride = io.WantCaptureKeyboard;
+    input->MouseOverride = io.WantCaptureMouse;
+
+    return quit;
 }
 
 }  // namespace platform_private

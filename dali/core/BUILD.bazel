@@ -23,6 +23,7 @@ cc_library(
         "defines.h",
         "filesystem.h",
         "function.h",
+        "input.h",
         "math.h",
         "memory.h",
         "string.h",
