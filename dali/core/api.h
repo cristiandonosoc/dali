@@ -80,6 +80,10 @@ struct PlatformTimeTracking {
     double TotalSeconds = 0;
 };
 
+struct PlatformGameLibraryState {
+	int ReloadCount = 0;
+};
+
 
 // The single handle the platform passes to the game on every entry point. Everything that must
 // outlive a DLL reload is reachable from here, so reloading the game image loses nothing.
@@ -90,6 +94,7 @@ struct PlatformState {
     PlatformMemory Memory = {};
     PlatformImGuiState ImGuiState = {};
 	PlatformTimeTracking TimeTracking = {};
+	PlatformGameLibraryState GameLibraryState = {};
     InputState Input = {};
 
     // The main window, created and owned by the platform.
@@ -97,10 +102,6 @@ struct PlatformState {
 
     // The game's root state. Allocated once by OnGameInit into Memory.PermanentArena; opaque here.
     void* GameState = nullptr;
-
-    // Frame timing.
-    f64 TotalSeconds = 0.0;
-    f32 DeltaSeconds = 0.0f;
 
     // The game clears this to request shutdown.
     bool Running = true;

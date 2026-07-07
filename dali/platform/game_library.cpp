@@ -45,6 +45,7 @@ SDL_Time GetModifiedTime(const char* path) {
 GameLibrary GameLibrary::Create(StringView dll_path) {
     GameLibrary gl = {};
     gl.Path.Set(dll_path);
+    SDL_Log("[platform] Tracking DLL in %s", dll_path.Str());
     return gl;
 }
 
@@ -56,8 +57,9 @@ bool GameLibrary::Load(PlatformState* ps) {
     // Loaded copies go to <dir of Path>/loaded_game_dlls (created on demand), not beside the
     // original DLL, so they stay corralled in one sweepable place instead of cluttering the game
     // directory.
-    StringView loaded_dir = paths::PathJoin(
-        scratch, paths::GetDirname(scratch, Path.ToString()), StringView("loaded_game_dlls"));
+    StringView loaded_dir = paths::PathJoin(scratch,
+                                            paths::GetDirname(scratch, Path.ToString()),
+                                            StringView("loaded_game_dlls"));
     if (!SDL_CreateDirectory(loaded_dir.Str())) {
         SDL_Log("ERROR: creating loaded-DLL dir '%s': %s", loaded_dir.Str(), SDL_GetError());
         return false;
@@ -102,7 +104,7 @@ bool GameLibrary::Load(PlatformState* ps) {
     _Handle = handle;
     LoadedPath.Set(loaded_path);
     _ModifiedTime = game_library_private::GetModifiedTime(Path.Str());
-    _LastLoadTime = ps->TotalSeconds;
+    _LastLoadTime = ps->TimeTracking.TotalSeconds;
 
     SDL_Log("Loaded game DLL '%s'", loaded_path);
     return true;
@@ -125,23 +127,20 @@ bool GameLibrary::IsDirty() const {
     if (Path.IsEmpty()) {
         return false;
     }
-    return game_library_private::GetModifiedTime(Path.Str()) > _ModifiedTime;
+    SDL_Time current_mod_time = game_library_private::GetModifiedTime(Path.Str());
+    return current_mod_time > _ModifiedTime;
 }
 
 bool GameLibrary::MaybeReload(PlatformState* ps) {
     // Throttle: never reload more than once per kReloadThrottleSeconds, so a burst of build-system
     // writes can't trigger a reload storm.
-    if (ps->TotalSeconds < _LastLoadTime + kReloadThrottleSeconds) {
+    if (ps->TimeTracking.TotalSeconds < _LastLoadTime + kReloadThrottleSeconds) {
         return false;
     }
 
     if (!IsDirty()) {
         return false;
     }
-
-    // TODO(cdc): The build system can touch the DLL before it has finished writing it. Kandinsky
-    //            waits a handful of frames and retries the copy for a bounded window before giving
-    //            up (see ReevaluateGameLibrary). Port that safety-frame/retry logic here.
 
     // Sometimes build systems touch the SO before it is ready (or they do in succession).
     // We wait for a certain amount of frames since we detect it outdated to give a chance to
@@ -157,12 +156,13 @@ bool GameLibrary::MaybeReload(PlatformState* ps) {
         gSafetyFrames = 0;
     }
 
-
     Unload(ps);
     if (!Load(ps)) {
         SDL_Log("ERROR: reload failed; game DLL is now unloaded");
         return false;
     }
+    ps->GameLibraryState.ReloadCount++;
+
     return true;
 }
 

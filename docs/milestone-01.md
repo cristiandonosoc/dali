@@ -27,7 +27,7 @@ counter ticks up. All driven from the hot-reloadable game DLL.
 
 Each step forces exactly one engine subsystem.
 
-### 1. `World` + GameState lifecycle
+### 1. `World` + GameState lifecycle (DONE)
 Build a `World` struct; `OnGameInit` allocates it into `Memory.PermanentArena` and stores the
 pointer in `ps->GameState`. `OnGameUpdate` / `OnGameRender` cast it back.
 - **Forces:** GameState-survives-reload wiring (arenas already exist; this is their first real user).

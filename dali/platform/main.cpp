@@ -60,7 +60,9 @@ int main(int argc, const char* argv[]) {
 	while (true) {
 		DEFER { PlatformEndFrame(gPlatformState); };
 
-        // TODO(cdc): Do hot-reloading here.
+        // Hot reloading.
+        gl.MaybeReload(gPlatformState);
+
         EPlatformFrameResponse response = PlatformBeginFrame(gPlatformState);
 		if (response == EPlatformFrameResponse::QuitRequested) {
 			SDL_Log("Quit Requested!");

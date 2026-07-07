@@ -8,6 +8,7 @@ cc_library(
         "platform_state.cpp",
     ],
     hdrs = [
+        "game.h",
         "log.h",
         "platform_state.h",
     ],
