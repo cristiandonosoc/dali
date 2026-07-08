@@ -72,6 +72,7 @@ auto* GetPtr(T& t) {
 }
 
 inline float Abs(float v) { return glm::abs(v); }
+inline int AbsI(int i) { return i < 0 ? -i : i; }
 
 inline float Exp(float v) { return glm::exp(v); }
 

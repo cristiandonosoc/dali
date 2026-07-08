@@ -9,6 +9,7 @@ cc_library(
     ],
     hdrs = [
         "game.h",
+        "hex.h",
         "log.h",
         "platform_state.h",
     ],
