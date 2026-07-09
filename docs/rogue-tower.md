@@ -6,8 +6,8 @@ reference and let *its* features drive engine requirements. That reference is **
 (Rusto Games, 2022).
 
 This document describes what Rogue Tower is and, for each system, what it demands from the engine.
-It is a requirements source, not a spec — the actual build order lives in `docs/milestone-01.md`
-and successors.
+It is a requirements source, not a spec — the actual build order lives in the milestone docs
+(`docs/milestone-02.md` is current; finished ones move to `docs/done/`).
 
 Sources: [Steam](https://store.steampowered.com/app/1843760/Rogue_Tower/) ·
 [Wiki: Hit Points](https://rogue-tower.fandom.com/wiki/Hit_Points) ·
@@ -124,4 +124,4 @@ dictate architecture — are:
 
 The forcing function Kandinsky lacked: build a vertical slice of *just* "append a hex tile, walk one
 enemy down it, one ballista shoots it" and you exercise grid, pathing, targeting, projectiles, and
-the render path together. That slice is `docs/milestone-01.md`.
+the render path together. That slice is `docs/done/milestone-01.md`.

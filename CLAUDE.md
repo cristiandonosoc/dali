@@ -99,6 +99,41 @@ public/private access sections. Trade-offs:
   it); `_`-prefixed members are only conventionally private — the compiler won't stop external
   access; data-first means you scroll past all fields to reach the API of a large struct.
 
+### Control flow
+
+These rules exist for one reason: **step-through debuggability**. Every branch decision and every
+side effect should sit on its own line where a breakpoint can land, and evaluation order should
+never be in question.
+
+- **Always brace.** Every `if` / `for` / `while` body gets braces, even a single statement. No
+  `if (x) return;` — write `if (x) { return; }` on its own lines.
+- **No side effects inside a larger expression.** Never embed an increment/decrement (or any
+  mutation) in a bigger expression: not `arr[cursor++ % size]`, not `id = NextId++`. Do the
+  mutation as its own statement first, then use the resulting value:
+
+  ```cpp
+  int index = cursor % size;
+  cursor++;
+  Hex src = arr[index];
+  ```
+
+- **No multi-condition `if`s — max 2, and only when tightly related.** A compound condition hides
+  which sub-expression was true. Prefer guard-clause early-returns / `continue`s (one condition
+  each), or nest, or build a bool up front:
+
+  ```cpp
+  bool condition = expr1;
+  condition &= expr2;
+  condition &= expr3;
+  if (condition) { ... }
+  ```
+
+  The only accepted 2-condition forms (each is a single idea): a **null-check guard**,
+  `if (n && n->Something())` — and `if (Foo* f = ...) { }` (init-statement / nested) is preferred;
+  and a **range check**, `if (x > min && x < max)`. Note `&=` does not short-circuit, so it can't
+  guard a null deref or a call that's only valid when a prior condition held — use the null-check /
+  nested form there and only start the `&=` chain once the value is known valid.
+
 ## Clang-format
 
 A `.clang-format` file is in the root. Claude does not need to run it — formatting is handled
