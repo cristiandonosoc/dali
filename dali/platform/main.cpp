@@ -49,7 +49,7 @@ int main(int argc, const char* argv[]) {
 
 
     GameLibrary gl = GameLibrary::Create(so_path);
-    if (!gl.Load(gPlatformState)) {
+    if (!gl.Load(gPlatformState, false)) {
         printf("ERROR: Loading library");
         return -1;
     }
@@ -59,6 +59,8 @@ int main(int argc, const char* argv[]) {
 
 	while (true) {
 		DEFER { PlatformEndFrame(gPlatformState); };
+
+		gPlatformState->FrameNumber++;
 
         // Hot reloading.
         gl.MaybeReload(gPlatformState);

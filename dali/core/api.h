@@ -72,7 +72,7 @@ struct PlatformImGuiState {
 struct PlatformTimeTracking {
     // The cpu ticks at the moment this time tracking was started.
     u64 StartFrameTicks = 0;
-	u64 LastFrameTicks = 0;
+    u64 LastFrameTicks = 0;
     // How much time we have been paused, which have to be offseted.
     double PauseOffsetSeconds = 0;
 
@@ -81,20 +81,21 @@ struct PlatformTimeTracking {
 };
 
 struct PlatformGameLibraryState {
-	int ReloadCount = 0;
+    int ReloadCount = 0;
 };
-
 
 // The single handle the platform passes to the game on every entry point. Everything that must
 // outlive a DLL reload is reachable from here, so reloading the game image loses nothing.
 struct PlatformState {
     FixedString<128> BasePath;
 
+	u64 FrameNumber = 0;
+
     PlatformAPI API = {};
     PlatformMemory Memory = {};
     PlatformImGuiState ImGuiState = {};
-	PlatformTimeTracking TimeTracking = {};
-	PlatformGameLibraryState GameLibraryState = {};
+    PlatformTimeTracking TimeTracking = {};
+    PlatformGameLibraryState GameLibraryState = {};
     InputState Input = {};
 
     // The main window, created and owned by the platform.
@@ -132,7 +133,7 @@ struct LoadedGameSO {
     bool (*OnGameRender)(PlatformState*) = nullptr;
     // Called immediately after every (re)load. Re-sync process-global state a fresh DLL image lost:
     // GL function table, ImGui context, etc.
-    bool (*OnSOLoaded)(PlatformState*) = nullptr;
+    bool (*OnSOLoaded)(PlatformState*, bool is_reload) = nullptr;
     // Called immediately before the DLL is unloaded for a reload. Tear down what OnSOLoaded set up.
     bool (*OnSOUnloaded)(PlatformState*) = nullptr;
 

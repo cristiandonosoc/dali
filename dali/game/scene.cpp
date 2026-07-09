@@ -49,6 +49,9 @@ bool LoadScene(World* world, StringView path) {
     world->Grid.InitRing(3);
     world->Goal = {};
     world->Enemies.Clear();
+    world->Projectiles.Clear();
+    world->BaseHealth = World::kMaxBaseHealth;
+    world->Gold = 0;
 
     // We build without exceptions, so use the non-throwing as<T>(fallback) accessors — as<T>() throws
     // on a missing/mistyped field. The file is our own throwaway output, so anything unexpected just
@@ -70,6 +73,8 @@ bool LoadScene(World* world, StringView path) {
             ETileContent content = (ETileContent)node["content"].as<int>(0);
             if (content == ETileContent::Spawner) {
                 MakeSpawner(tile);  // re-seed the random phase offset on load
+            } else if (content == ETileContent::Tower) {
+                MakeTower(tile);
             } else {
                 tile->Content = content;
             }

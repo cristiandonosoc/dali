@@ -33,7 +33,7 @@ KDK_API bool OnGameRender(kdk::PlatformState* ps) {
     return true;
 }
 
-KDK_API bool OnSOLoaded(kdk::PlatformState* ps) {
+KDK_API bool OnSOLoaded(kdk::PlatformState* ps, bool is_reload) {
     using namespace kdk;
 
     SetGlobalPlatformState(ps);
@@ -41,7 +41,9 @@ KDK_API bool OnSOLoaded(kdk::PlatformState* ps) {
     // NOTE: GameState is initialized on |OnGameInit|, which is called after the first load.
     if (auto* game_state = (GameState*)ps->GameState) {
         ASSERT(ps->GameLibraryState.ReloadCount == game_state->InternalDetectedReload);
-        game_state->InternalDetectedReload++;
+        if (is_reload) {
+            game_state->InternalDetectedReload++;
+        }
     }
 
     ImGui::SetCurrentContext((ImGuiContext*)ps->ImGuiState.Context);

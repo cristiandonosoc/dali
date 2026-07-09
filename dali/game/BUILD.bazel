@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 cc_library(
     name = "lib",
@@ -22,6 +23,20 @@ cc_library(
         "//dali/core",
         "//third_party:imgui",
         "//third_party:yaml-cpp",
+    ],
+)
+
+cc_test(
+    name = "hex_test",
+    srcs = [
+        "hex_test.cpp",
+    ],
+    testonly = True,
+    size = "small",
+    defines = ["KDK_IN_TEST=1"],
+    deps = [
+        ":lib",
+        "//third_party:catch2",
     ],
 )
 

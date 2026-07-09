@@ -33,7 +33,7 @@ struct GameLibrary {
 
     // Copies |Path| to a fresh temp file, loads it, resolves the five entry points, and fires
     // OnSOLoaded. Returns false (and loads nothing) on any failure.
-    bool Load(PlatformState* ps);
+    bool Load(PlatformState* ps, bool is_reload);
 
     // Fires OnSOUnloaded, unloads the module, and clears the resolved SO. Safe on an empty library.
     void Unload(PlatformState* ps);

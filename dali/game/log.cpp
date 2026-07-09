@@ -25,6 +25,13 @@ void Log(ELogSeverity severity, const char* fmt, ...) {
     va_end(args);
 }
 
+void LogInfo(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    log_private::LogV(ELogSeverity::Info, fmt, args);
+    va_end(args);
+};
+
 void LogWarning(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);

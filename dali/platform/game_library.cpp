@@ -18,10 +18,11 @@ bool ResolveEntryPoints(SDL_SharedObject* handle, LoadedGameSO* out) {
     };
 
     using EntryFn = bool (*)(PlatformState*);
+    using ReloadFn = bool (*)(PlatformState*, bool);
     out->OnGameInit = (EntryFn)load(KDK_ON_GAME_INIT_NAME);
     out->OnGameUpdate = (EntryFn)load(KDK_ON_GAME_UPDATE_NAME);
     out->OnGameRender = (EntryFn)load(KDK_ON_GAME_RENDER_NAME);
-    out->OnSOLoaded = (EntryFn)load(KDK_ON_SO_LOADED_NAME);
+    out->OnSOLoaded = (ReloadFn)load(KDK_ON_SO_LOADED_NAME);
     out->OnSOUnloaded = (EntryFn)load(KDK_ON_SO_UNLOADED_NAME);
 
     if (!out->IsValid()) {
@@ -49,7 +50,7 @@ GameLibrary GameLibrary::Create(StringView dll_path) {
     return gl;
 }
 
-bool GameLibrary::Load(PlatformState* ps) {
+bool GameLibrary::Load(PlatformState* ps, bool is_reload) {
     ASSERT(!Path.IsEmpty());
 
     ScratchArena scratch = Arena::GetScratch();
@@ -94,7 +95,7 @@ bool GameLibrary::Load(PlatformState* ps) {
         return false;
     }
 
-    if (!so.OnSOLoaded(ps)) {
+    if (!so.OnSOLoaded(ps, is_reload)) {
         SDL_Log("ERROR: OnSOLoaded failed for '%s'", loaded_path);
         SDL_UnloadObject(handle);
         return false;
@@ -157,7 +158,7 @@ bool GameLibrary::MaybeReload(PlatformState* ps) {
     }
 
     Unload(ps);
-    if (!Load(ps)) {
+    if (!Load(ps, true)) {
         SDL_Log("ERROR: reload failed; game DLL is now unloaded");
         return false;
     }

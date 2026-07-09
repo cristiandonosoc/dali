@@ -3,6 +3,7 @@
 #include <dali/core/api.h>
 #include <dali/core/color.h>
 #include <dali/game/hex.h>
+#include <dali/game/log.h>
 #include <dali/game/scene.h>
 
 #include <imgui.h>
@@ -17,11 +18,20 @@ namespace kdk {
 constexpr float kHexSize = 60.0f;
 constexpr float kSpawnInterval = 1.0f;  // Seconds between spawns, per spawner.
 
+// Tower tuning. Range is in world units (pixels); at kHexSize=60 a range of 180 reaches ~3 tiles.
+constexpr float kTowerRange = 180.0f;
+constexpr float kTowerFireInterval = 0.6f;    // Seconds between shots.
+constexpr float kTowerDamage = 5.0f;          // Per projectile; enemies start at 10 HP.
+constexpr float kProjectileHitRadius = 8.0f;  // Distance at which a projectile connects.
+
 namespace game_private {
 
 // Draws a short arrow from |from_center| toward |toward_center| (a neighbouring tile center),
 // scaled to |size|. Used to visualize each path tile's PathDirection.
-void DrawArrow(ImDrawList* draw_list, ImVec2 from_center, ImVec2 toward_center, float size,
+void DrawArrow(ImDrawList* draw_list,
+               ImVec2 from_center,
+               ImVec2 toward_center,
+               float size,
                Color32 color) {
     Vec2 delta(toward_center.x - from_center.x, toward_center.y - from_center.y);
     if (IsZero(delta)) {
@@ -40,9 +50,32 @@ void DrawArrow(ImDrawList* draw_list, ImVec2 from_center, ImVec2 toward_center, 
     Vec2 back(-dir.x, -dir.y);
     Vec2 left(back.x * Cos(a) - back.y * Sin(a), back.x * Sin(a) + back.y * Cos(a));
     Vec2 right(back.x * Cos(-a) - back.y * Sin(-a), back.x * Sin(-a) + back.y * Cos(-a));
-    draw_list->AddLine(tip, ImVec2(tip.x + left.x * kHead, tip.y + left.y * kHead), color.Bits, 3.0f);
-    draw_list->AddLine(tip, ImVec2(tip.x + right.x * kHead, tip.y + right.y * kHead), color.Bits,
+    draw_list->AddLine(tip,
+                       ImVec2(tip.x + left.x * kHead, tip.y + left.y * kHead),
+                       color.Bits,
                        3.0f);
+    draw_list->AddLine(tip,
+                       ImVec2(tip.x + right.x * kHead, tip.y + right.y * kHead),
+                       color.Bits,
+                       3.0f);
+}
+
+// Draws a horizontal health bar (black backdrop + colored fill) centered at |center_x| with its top
+// at |top_y|. |fraction| is clamped to [0,1]; an empty bar still shows the backdrop.
+void DrawHealthBar(ImDrawList* draw_list,
+                   float center_x,
+                   float top_y,
+                   float width,
+                   float fraction,
+                   Color32 fill) {
+    constexpr float kHeight = 3.0f;
+    float f = Clamp(fraction, 0.0f, 1.0f);
+    ImVec2 bar_min(center_x - width * 0.5f, top_y);
+    ImVec2 bar_max(bar_min.x + width, bar_min.y + kHeight);
+    ImVec2 fill_max(bar_min.x + width * f, bar_max.y);
+    draw_list->AddRectFilled(bar_min, bar_max, Color32::Black.Bits);
+    draw_list->AddRectFilled(bar_min, fill_max, fill.Bits);
+    draw_list->AddRect(bar_min, bar_max, Color32::Black.Bits);
 }
 
 // Debug-draws the grid straight onto ImGui's background draw list. Per milestone-01 step 3 there is
@@ -107,18 +140,34 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world) {
         DrawArrow(draw_list, center, toward, kHexSize, Color32::BrightGold);
     }
 
-    // Buildings: a tile holds at most one. Spawners (enemy origins) are green discs.
+    // Buildings: a tile holds at most one. Spawners (enemy origins) are green discs; towers are
+    // blue discs ringed by a faint circle showing their firing range.
     for (const Tile& tile : world->Grid.Tiles) {
+        ImVec2 center = tile_center(tile.Hex);
         if (tile.Content == ETileContent::Spawner) {
-            ImVec2 center = tile_center(tile.Hex);
             draw_list->AddCircleFilled(center, 10.0f, Color32::Green.Bits);
+            draw_list->AddCircle(center, 10.0f, Color32::White.Bits, 0, 2.0f);
+        } else if (tile.Content == ETileContent::Tower) {
+            // The range ring only shows while hovering this tower, so a dense field stays readable.
+            if (tile.Hex == hovered) {
+                draw_list->AddCircle(center, kTowerRange, Color32::Cyan.Bits, 0, 2.0f);
+            }
+            draw_list->AddCircleFilled(center, 10.0f, Color32::SteelBlue.Bits);
             draw_list->AddCircle(center, 10.0f, Color32::White.Bits, 0, 2.0f);
         }
     }
 
-    // The goal: the tile every path drains into.
+    // The goal: the tile every path drains into. Its base-health bar is always shown so you can
+    // watch it drop as enemies break through.
     if (world->Goal.has_value()) {
-        draw_list->AddCircleFilled(tile_center(*world->Goal), 9.0f, Color32::Red.Bits);
+        ImVec2 center = tile_center(*world->Goal);
+        draw_list->AddCircleFilled(center, 9.0f, Color32::Red.Bits);
+        DrawHealthBar(draw_list,
+                      center.x,
+                      center.y - 18.0f,
+                      28.0f,
+                      world->BaseHealth / World::kMaxBaseHealth,
+                      Color32::Green);
     }
 
     // Enemies walking the flow field from spawner toward the goal.
@@ -126,6 +175,22 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world) {
         ImVec2 p(origin.x + enemy.Position.x, origin.y + enemy.Position.y);
         draw_list->AddCircleFilled(p, 6.0f, Color32::OrangeRed.Bits);
         draw_list->AddCircle(p, 6.0f, Color32::Black.Bits, 0, 1.5f);
+
+        // Health bar, only once the enemy has taken damage (a full bar would just be clutter).
+        if (enemy.MaxHealth > 0.0f && enemy.Health < enemy.MaxHealth) {
+            DrawHealthBar(draw_list,
+                          p.x,
+                          p.y - 12.0f,
+                          18.0f,
+                          enemy.Health / enemy.MaxHealth,
+                          Color32::Green);
+        }
+    }
+
+    // Tower projectiles in flight toward their targets.
+    for (const Projectile& projectile : world->Projectiles) {
+        ImVec2 p(origin.x + projectile.Position.x, origin.y + projectile.Position.y);
+        draw_list->AddCircleFilled(p, 3.0f, Color32::Yellow.Bits);
     }
 
     return result;
@@ -217,14 +282,33 @@ void World::SpawnEnemy(Hex at) {
         return;
     }
     Enemy enemy = {};
+    enemy.Id = NextEnemyId++;
     enemy.Position = Hex::HexToWorld(kHexSize, at);
     enemy.Target = at;  // retargets to the next flow-field tile on the first update
+    enemy.MaxHealth = enemy.Health;
     Enemies.Push(enemy);
+}
+
+Enemy* World::FindEnemy(u32 id) {
+    if (id == 0) {
+        return nullptr;
+    }
+    for (Enemy& enemy : Enemies) {
+        if (enemy.Id == id) {
+            return &enemy;
+        }
+    }
+    return nullptr;
 }
 
 void MakeSpawner(Tile* tile) {
     tile->Content = ETileContent::Spawner;
     tile->SpawnTimer = random::FloatUNI();  // phase offset in [0,1)s so spawners don't sync up
+}
+
+void MakeTower(Tile* tile) {
+    tile->Content = ETileContent::Tower;
+    tile->FireCooldown = 0.0f;  // ready to fire the moment an enemy walks into range
 }
 
 void World::UpdateSpawners(float dt) {
@@ -273,10 +357,88 @@ void World::UpdateEnemies(float dt) {
         }
 
         if (arrived) {
+            BaseHealth = Max(0.0f, BaseHealth - enemy.Damage);  // enemy breached the goal
             Enemies.RemoveUnorderedAt(i);  // swaps the last enemy into i; reprocess it
         } else {
             ++i;
         }
+    }
+}
+
+void World::UpdateTowers(float dt) {
+    // Precompute the base position once; targeting prioritizes the enemy nearest it (the Rogue
+    // Tower default — punish the enemy about to break through). Without a goal, fall back to
+    // nearest-to-tower.
+    std::optional<Vec2> goal_pos;
+    if (Goal.has_value()) {
+        goal_pos = Hex::HexToWorld(kHexSize, *Goal);
+    }
+
+    for (Tile& tile : Grid.Tiles) {
+        if (tile.Content != ETileContent::Tower) {
+            continue;
+        }
+
+        tile.FireCooldown -= dt;
+        if (tile.FireCooldown > 0.0f) {
+            continue;
+        }
+
+        // Among enemies in range, pick the one closest to the base. Compare squared distances to
+        // skip the sqrt.
+        Vec2 tower_pos = Hex::HexToWorld(kHexSize, tile.Hex);
+        constexpr float kRangeSq = kTowerRange * kTowerRange;
+        Enemy* target = nullptr;
+        float best_priority = 0.0f;  // lower wins; meaning depends on goal_pos
+        for (Enemy& enemy : Enemies) {
+            float d_sq = LengthSq(enemy.Position - tower_pos);
+            if (d_sq > kRangeSq) {
+                continue;  // out of range
+            }
+            float priority = goal_pos.has_value() ? LengthSq(enemy.Position - *goal_pos) : d_sq;
+            if (!target || priority < best_priority) {
+                best_priority = priority;
+                target = &enemy;
+            }
+        }
+
+        if (!target || Projectiles.IsFull()) {
+            continue;  // nothing in range (or no room) — hold fire, retry next frame
+        }
+
+        Projectile projectile = {};
+        projectile.Position = tower_pos;
+        projectile.TargetId = target->Id;
+        projectile.Damage = kTowerDamage;
+        Projectiles.Push(projectile);
+        tile.FireCooldown = kTowerFireInterval;
+    }
+}
+
+void World::UpdateProjectiles(float dt) {
+    for (i32 i = 0; i < Projectiles.Size;) {
+        Projectile& projectile = Projectiles[i];
+
+        Enemy* target = FindEnemy(projectile.TargetId);
+        if (!target) {
+            Projectiles.RemoveUnorderedAt(i);  // target died/escaped before we reached it
+            continue;
+        }
+
+        Vec2 delta = target->Position - projectile.Position;
+        if (LengthSq(delta) <= kProjectileHitRadius * kProjectileHitRadius) {
+            target->Health -= projectile.Damage;
+            if (target->Health <= 0.0f) {
+                Gold += target->Reward;  // bounty for the kill
+                Enemies.RemoveUnorderedAt((i32)(target - Enemies.begin()));
+            }
+            Projectiles.RemoveUnorderedAt(i);
+            continue;
+        }
+
+        Vec2 dir = Normalize(delta);
+        projectile.Position += dir * (projectile.Speed * dt);
+        ++i;
     }
 }
 
@@ -300,6 +462,8 @@ void GameUpdate(PlatformState* ps, GameState* gs) {
     world.Count++;
     world.UpdateSpawners(dt);
     world.UpdateEnemies(dt);
+    world.UpdateTowers(dt);
+    world.UpdateProjectiles(dt);
 }
 
 StringView ToString(EOperationMode mode) {
@@ -308,6 +472,7 @@ StringView ToString(EOperationMode mode) {
         case EOperationMode::TogglePath: return "Toggle Path"sv;
         case EOperationMode::SetPathGoal: return "Set Path Goal"sv;
         case EOperationMode::ToggleSpawner: return "Toggle Spawner"sv;
+        case EOperationMode::ToggleTower: return "Toggle Tower"sv;
     }
     // clang-format on
     ASSERT(false);
@@ -342,8 +507,18 @@ void GameRender(PlatformState* ps, GameState* gs) {
                     if (tile->Content == ETileContent::Spawner) {
                         tile->Content = ETileContent::None;
                     } else if (tile->IsPath) {
-                        // Only path tiles can host a spawner. Placing it replaces any other content.
+                        // Only path tiles can host a spawner. Placing it replaces any other
+                        // content.
                         MakeSpawner(tile);
+                    }
+                    break;
+                }
+                case EOperationMode::ToggleTower: {
+                    if (tile->Content == ETileContent::Tower) {
+                        tile->Content = ETileContent::None;
+                    } else if (!tile->IsPath) {
+                        // Towers guard the path from beside it, so they only go on non-path tiles.
+                        MakeTower(tile);
                     }
                     break;
                 }
@@ -376,6 +551,27 @@ void GameRender(PlatformState* ps, GameState* gs) {
         LoadScene(&gs->World, kScenePath);
     }
 
+    // Debug spawn: drop one crawler onto a spawner (or, failing that, any path tile that still has a
+    // route to the goal) so you can farm towers without waiting on the spawn timers.
+    if (ImGui::Button("Spawn Enemy")) {
+        Tile* origin = nullptr;
+        for (Tile& tile : gs->World.Grid.Tiles) {
+            if (tile.Content == ETileContent::Spawner) {
+                origin = &tile;
+                break;
+            }
+            if (!origin && tile.IsPath && tile.PathDirection != NONE) {
+                origin = &tile;  // fallback; keep scanning in case a real spawner shows up
+            }
+        }
+        if (origin) {
+            gs->World.SpawnEnemy(origin->Hex);
+        }
+    }
+
+    ImGui::Text("Base Health: %.0f / %.0f", gs->World.BaseHealth, World::kMaxBaseHealth);
+    ImGui::Text("Gold: %d", gs->World.Gold);
+    ImGui::Text("Enemies: %d", gs->World.Enemies.Size);
     ImGui::Text("World Count: %d", gs->World.Count);
     ImGui::Text("DLL Reload Count: %d", gs->InternalDetectedReload);
     ImGui::End();
