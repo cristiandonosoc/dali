@@ -2,14 +2,27 @@
 
 #include <dali/game/hex.h>
 #include <dali/core/container.h>
+#include <dali/core/string.h>
+
+#include <optional>
 
 namespace kdk {
 
 struct PlatformState;
 
+// What a tile holds. Mutually exclusive — a tile has at most one building.
+enum class ETileContent : u8 {
+	None,
+	Spawner,
+	Tower,
+};
+
 struct Tile {
     Hex Hex = {};
     bool IsPath = false;
+
+	int PathDirection = NONE;
+	ETileContent Content = ETileContent::None;
 };
 
 struct Grid {
@@ -22,26 +35,59 @@ struct Grid {
     Tile* FindTile(Hex hex);
 };
 
-// Ordered route enemies follow: spawn at [0], base at the last element. Kept separate from the
-// grid because Tile::IsPath alone loses the ordering enemies need.
-constexpr i32 kMaxPathTiles = 16;
-using Path = FixedVector<Hex, kMaxPathTiles>;
-
-// Builds a straight run of |steps| + 1 contiguous tiles from |start| walking in |dir| (0..5).
-// Contiguity is true by construction (each tile is the previous one's Neighbour).
-void BuildStraightPath(Path* out, Hex start, int dir, int steps);
+struct Enemy {
+	Vec2 Position = {};    // World space (pre-view-origin). World unit == pixel.
+	Hex Target = {};       // The tile it is walking toward; the flow field picks the next one.
+	float Speed = 100.0f;  // Pixels per second.
+	float Health = 10.0f;  // Single HP pool; unused until the damage step.
+};
 
 struct World {
+	static constexpr i32 kMaxPathTiles = 16;
+	static constexpr i32 kMaxEnemies = 128;
+
 	int Count = 0;
     Grid Grid = {};
-    Path Path = {};
+    FixedVector<Hex, kMaxPathTiles> Path = {};
+	// The tile every path drains into. All PathDirections point one hex closer to it.
+	std::optional<Hex> Goal = {};
+
+	FixedVector<Enemy, kMaxEnemies> Enemies = {};
+	float SpawnTimer = 0.0f;  // Seconds accumulated toward the next spawn.
 
     // Sets up the M01 level: a radius-3 grid with a hardcoded straight diameter path (spawn at one
     // edge, through the center, base at the opposite edge).
     void InitLevel();
+	void BuildStraightPath(Hex start, int dir, int steps);
+	// Flood-fills PathDirection on every path tile so each steps toward the neighbour one hex closer
+	// to Goal (BFS from Goal over IsPath tiles). Tiles with no route to Goal are left at NONE.
+	void CalculatePath();
+
+	void SpawnEnemy(Hex at);
+	// Accumulates dt; every spawn interval, spawns one enemy from each spawner tile.
+	void UpdateSpawners(float dt);
+	// Advances each enemy along the flow field; despawns those that reach the goal.
+	void UpdateEnemies(float dt);
+};
+
+enum class EOperationMode : u8 {
+	TogglePath,
+	SetPathGoal,
+	ToggleSpawner,
+};
+StringView ToString(EOperationMode mode);
+
+// Every EOperationMode value, in menu order. Keep in sync with the enum (and ToString) when adding
+// operations — this is what the ImGui operation selector iterates.
+constexpr EOperationMode kOperationModes[] = {
+	EOperationMode::TogglePath,
+	EOperationMode::SetPathGoal,
+	EOperationMode::ToggleSpawner,
 };
 
 struct GameState {
+	EOperationMode CurrentOperation = EOperationMode::TogglePath;
+
 	World World = {};
 	int InternalDetectedReload = 0;
 };
