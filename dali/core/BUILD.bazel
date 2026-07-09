@@ -34,6 +34,7 @@ cc_library(
         "//third_party:sdl3",
         "//third_party:stb",
         "//third_party:glm",
+        "//third_party:fastPRNG",
     ],
 )
 

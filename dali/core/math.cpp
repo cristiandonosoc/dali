@@ -3,6 +3,7 @@
 #include <dali/core/string.h>
 
 #include <SDL3/SDL_log.h>
+#include <fastPRNG.h>
 
 namespace kdk {
 
@@ -71,5 +72,16 @@ void CalculateModelMatrix(const Transform& transform, Mat4* out_model) {
 
     *out_model = mmodel;
 }
+
+// RANDOM ------------------------------------------------------------------------------------------
+
+namespace random {
+
+float FloatUNI() {
+    // TODO(cdc): For now we call static.
+    return fastPRNG::fastXS64s::xoroshiro128p_UNI<float>();
+}
+
+}  // namespace random
 
 }  // namespace kdk

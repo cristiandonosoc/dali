@@ -221,4 +221,14 @@ inline Quat& AddRotation(Transform* transform, const Vec3& axis, float deg) {
 
 void CalculateModelMatrix(const Transform& transform, Mat4* out_model);
 
+// RANDOM ------------------------------------------------------------------------------------------
+
+namespace random {
+
+// returns [0, 1).
+float FloatUNI();
+
+} // namespace random
+
+
 }  // namespace kdk

@@ -2,113 +2,119 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 cc_library(
     name = "sdl3",
-    visibility = ["//visibility:public"],
     deps = ["//third_party/SDL3-3.2.2:lib"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "glad",
-    visibility = ["//visibility:public"],
     deps = ["//third_party/glad:lib"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "stb",
     includes = ["."],
     linkstatic = True,
-    visibility = ["//visibility:public"],
     deps = ["//third_party/stb"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "glm",
     includes = ["."],
     linkstatic = True,
-    visibility = ["//visibility:public"],
     deps = ["//third_party/glm"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "imgui",
     includes = ["third_party/imgui-1.91.8"],
-    visibility = ["//visibility:public"],
     deps = ["//third_party/imgui-1.91.8:lib"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "imguizmo",
     includes = ["third_party/ImGuizmo-master"],
-    visibility = ["//visibility:public"],
     deps = ["//third_party/ImGuizmo-master:imguizmo"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "imgui_sdl3_opengl3",
     includes = ["third_party/imgui-1.91.8/backends"],
-    visibility = ["//visibility:public"],
     deps = [
         ":imgui",
         "//third_party/imgui-1.91.8:opengl3_backend",
         "//third_party/imgui-1.91.8:sdl3_backend",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "assimp",
-    visibility = ["//visibility:public"],
     deps = [
         "//third_party/assimp-5.4.3:lib",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "cwalk",
-    visibility = ["//visibility:public"],
     deps = [
         "//third_party/cwalk-1.2.9:lib",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "yaml-cpp",
-    visibility = ["//visibility:public"],
     deps = [
         # "//third_party/yaml-cpp-0.8.0:yaml-cpp",
         "//third_party/yaml-cpp-0.8.0:yaml-cpp-prebuilt",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "b64",
-    visibility = ["//visibility:public"],
     deps = [
         "//third_party/b64.c-master:b64",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "nfd",
-    visibility = ["//visibility:public"],
     deps = [
         "//third_party/nativefiledialog-extended-1.2.1:nfd",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "libclang",
-    visibility = ["//visibility:public"],
     deps = [
         "//third_party/LLVM-20.1.0:lib",
     ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "fastPRNG",
+    deps = ["//third_party/fastPRNG"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "catch2",
     testonly = True,
     linkstatic = True,
-    visibility = ["//visibility:public"],
     deps = [
         # "//third_party/Catch2-3.8.0:catch2_main",
         "//third_party/Catch2-3.8.0:catch2_main_prebuilt",
     ],
+    visibility = ["//visibility:public"],
 )

@@ -27,5 +27,6 @@ CompileFlags:
     "-isystem", "third_party/b64.c-master",
     "-isystem", "third_party/nativefiledialog-extended-1.2.1/src/include",
     "-isystem", "third_party/glad/include",
+    "-isystem", "third_party/fastPRNG",
     "-isystem", "extras/includes",
   ]
