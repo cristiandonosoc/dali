@@ -3,6 +3,7 @@
 #include <dali/core/api.h>
 #include <dali/core/color.h>
 #include <dali/game/hex.h>
+#include <dali/game/scene.h>
 
 #include <imgui.h>
 
@@ -275,10 +276,15 @@ void World::UpdateEnemies(float dt) {
     }
 }
 
+constexpr StringView kScenePath = "extras/scene.yaml"sv;
+
 void GameInit(PlatformState* ps, GameState* gs) {
     (void)ps;
 
-    gs->World.InitLevel();
+    // Reload the last saved scene; fall back to the hardcoded default the first time (no file yet).
+    if (!LoadScene(&gs->World, kScenePath)) {
+        gs->World.InitLevel();
+    }
 
     printf("[game] GameInit\n");
 }
@@ -356,6 +362,14 @@ void GameRender(PlatformState* ps, GameState* gs) {
             }
         }
         ImGui::EndCombo();
+    }
+
+    if (ImGui::Button("Save Scene")) {
+        SaveScene(gs->World, kScenePath);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Load Scene")) {
+        LoadScene(&gs->World, kScenePath);
     }
 
     ImGui::Text("World Count: %d", gs->World.Count);

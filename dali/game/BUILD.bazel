@@ -8,17 +8,20 @@ cc_library(
         "hex.cpp",
         "log.cpp",
         "platform_state.cpp",
+        "scene.cpp",
     ],
     hdrs = [
         "game.h",
         "hex.h",
         "log.h",
         "platform_state.h",
+        "scene.h",
     ],
     visibility = ["//dali:__subpackages__"],
     deps = [
         "//dali/core",
         "//third_party:imgui",
+        "//third_party:yaml-cpp",
     ],
 )
 
