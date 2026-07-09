@@ -3,34 +3,21 @@
 #include <dali/core/api.h>
 #include <dali/core/color.h>
 #include <dali/game/hex.h>
-#include <dali/game/platform_state.h>
 
 #include <imgui.h>
 
 #include <cstdio>
 
-namespace kdk {
-
-GameState* GetGameState(PlatformState* ps) {
-    ASSERT(ps->GameState);
-    return (GameState*)ps->GameState;
-}
-
-World* GetWorld(PlatformState* ps) { return &GetGameState(ps)->World; }
-
-}  // namespace kdk
-
 namespace game_private {
 
-// Debug-draws a small hex neighbourhood straight onto ImGui's background draw list. Per
-// milestone-01 step 3 there is no engine render layer yet — this is the temporary draw path that
-// lets the grid/hover/path steps proceed before we know which primitives the real renderer needs.
-// The hex under the mouse is highlighted, which also proves the world<->hex transform round-trips.
-void DrawHexGrid(kdk::PlatformState* ps) {
+// Debug-draws the grid straight onto ImGui's background draw list. Per milestone-01 step 3 there is
+// no engine render layer yet — this is the temporary draw path that lets the grid/hover/path steps
+// proceed before we know which primitives the real renderer needs. The hex under the mouse is
+// highlighted, which also proves the world<->hex transform round-trips.
+void DrawHexGrid(kdk::World* world) {
     using namespace kdk;
 
     constexpr float kHexSize = 60.0f;  // Distance from a hex center to a corner, in pixels.
-    constexpr int kGridRadius = 3;     // Radius-1 neighbourhood: a center tile ringed by 6.
 
     ImGuiIO& io = ImGui::GetIO();
     Vec2 origin(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
@@ -42,67 +29,110 @@ void DrawHexGrid(kdk::PlatformState* ps) {
 
     ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
 
-    for (int q = -kGridRadius; q <= kGridRadius; ++q) {
-        int r_lo = Max(-kGridRadius, -q - kGridRadius);
-        int r_hi = Min(kGridRadius, -q + kGridRadius);
-        for (int r = r_lo; r <= r_hi; ++r) {
-            Hex hex{q, r};
+    // A tile-center in screen space. Shared by the grid pass and the path spine so they line up.
+    auto tile_center = [&](Hex hex) -> ImVec2 {
+        Vec2 w = Hex::HexToWorld(kHexSize, hex);
+        return ImVec2(origin.x + w.x, origin.y + w.y);
+    };
 
-            Vec2 world = Hex::HexToWorld(kHexSize, hex);
-            Vec2 center(origin.x + world.x, origin.y + world.y);
+    for (const Tile& tile : world->Grid.Tiles) {
+        ImVec2 center = tile_center(tile.Hex);
 
-            ImVec2 corners[6];
-            for (int i = 0; i < 6; ++i) {
-                Vec2 c = Hex::HexCorner(kHexSize, center, i);
-                corners[i] = ImVec2(c.x, c.y);
-            }
-
-            bool is_hovered = hex.Q == hovered.Q && hex.R == hovered.R;
-            Color32 fill = is_hovered ? Color32::Gold : Color32::DarkSlateGrey;
-
-            draw_list->AddConvexPolyFilled(corners, 6, fill.Bits);
-            draw_list->AddPolyline(corners, 6, Color32::White.Bits, ImDrawFlags_Closed, 2.0f);
+        ImVec2 corners[6];
+        for (int i = 0; i < 6; ++i) {
+            Vec2 c = Hex::HexCorner(kHexSize, Vec2(center.x, center.y), i);
+            corners[i] = ImVec2(c.x, c.y);
         }
+
+        // Hover wins over the path color, which wins over the plain grid color.
+        Color32 fill = Color32::DarkSlateGrey;
+        if (tile.IsPath) {
+            fill = Color32::Sienna;
+        }
+        if (tile.Hex == hovered) {
+            fill = Color32::Gold;
+        }
+
+        draw_list->AddConvexPolyFilled(corners, 6, fill.Bits);
+        draw_list->AddPolyline(corners, 6, Color32::White.Bits, ImDrawFlags_Closed, 2.0f);
     }
 
-    (void)ps;
+    // The path spine: an ordered polyline through the path-tile centers. A visible gap here would
+    // mean two consecutive path tiles aren't neighbours. Spawn is green, base is red.
+    const Path& path = world->Path;
+    if (path.Size >= 2) {
+        ImVec2 spine[kMaxPathTiles];
+        for (int i = 0; i < path.Size; ++i) {
+            spine[i] = tile_center(path[i]);
+        }
+        draw_list->AddPolyline(spine, path.Size, Color32::BrightGold.Bits, ImDrawFlags_None, 4.0f);
+        draw_list->AddCircleFilled(spine[0], 8.0f, Color32::Green.Bits);
+        draw_list->AddCircleFilled(spine[path.Size - 1], 8.0f, Color32::Red.Bits);
+    }
 }
 
 }  // namespace game_private
 
-// The hot-reloadable game DLL. For now every entry point just prints, so we can verify the
-// platform's load-and-call flow end to end before there is any real gameplay. The five functions
-// are exported with C linkage so their symbol names match the KDK_*_NAME strings the platform
-// resolves (see dali/core/api.h).
+namespace kdk {
 
-extern "C" {
-
-KDK_API bool OnGameInit(kdk::PlatformState* ps) {
-    using namespace kdk;
-
-    auto* game_state = ps->Memory.PermanentArena.PushZero<GameState>();
-    ps->GameState = game_state;
-
-    printf("[game] OnGameInit\n");
-    return true;
+void Grid::InitRing(int radius) {
+    Tiles.Size = 0;
+    for (int q = -radius; q <= radius; ++q) {
+        int r_lo = Max(-radius, -q - radius);
+        int r_hi = Min(radius, -q + radius);
+        for (int r = r_lo; r <= r_hi; ++r) {
+            Tiles.Push(Tile{.Hex = Hex{q, r}});
+        }
+    }
 }
 
-KDK_API bool OnGameUpdate(kdk::PlatformState* ps) {
-    using namespace kdk;
-
-    World* world = GetWorld(ps);
-    world->Count++;
-
-    return true;
+Tile* Grid::FindTile(Hex hex) {
+    for (Tile& tile : Tiles) {
+        if (tile.Hex == hex) {
+            return &tile;
+        }
+    }
+    return nullptr;
 }
 
-KDK_API bool OnGameRender(kdk::PlatformState* ps) {
-    using namespace kdk;
+void BuildStraightPath(Path* out, Hex start, int dir, int steps) {
+    out->Size = 0;
+    Hex hex = start;
+    out->Push(hex);
+    for (int i = 0; i < steps; ++i) {
+        hex = hex.Neighbour(dir);
+        out->Push(hex);
+    }
+}
 
-    GameState* game_state = GetGameState(ps);
-    World* world = &game_state->World;
+void World::InitLevel() {
+    Grid.InitRing(3);
+    BuildStraightPath(&Path, Hex{-3, 0}, 0, 6);
+    for (const Hex& hex : Path) {
+        if (Tile* tile = Grid.FindTile(hex)) {
+            tile->IsPath = true;
+        }
+    }
+}
 
-    game_private::DrawHexGrid(ps);
+void GameInit(PlatformState* ps, GameState* gs) {
+    (void)ps;
+
+    gs->World.InitLevel();
+
+    printf("[game] GameInit\n");
+}
+
+void GameUpdate(PlatformState* ps, GameState* gs) {
+    (void)ps;
+
+    gs->World.Count++;
+}
+
+void GameRender(PlatformState* ps, GameState* gs) {
+    (void)ps;
+
+    game_private::DrawHexGrid(&gs->World);
 
     // ImGui UI is submitted here (between the platform's NewFrame and Render). Draw data is
     // finalized and rendered by the platform in PlatformEndFrame.
@@ -111,38 +141,9 @@ KDK_API bool OnGameRender(kdk::PlatformState* ps) {
     ImGui::Begin("Dali");
     ImGui::Text("Hello from the game DLL");
     ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
-    ImGui::Text("World Count: %d", world->Count);
-    ImGui::Text("DLL Reload Count: %d", game_state->InternalDetectedReload);
-
+    ImGui::Text("World Count: %d", gs->World.Count);
+    ImGui::Text("DLL Reload Count: %d", gs->InternalDetectedReload);
     ImGui::End();
-
-    return true;
 }
 
-KDK_API bool OnSOLoaded(kdk::PlatformState* ps) {
-    using namespace kdk;
-
-    SetGlobalPlatformState(ps);
-
-    // NOTE: GameState is initialized on |OnGameInit|, which is called after the first load.
-    if (auto* game_state = (GameState*)ps->GameState) {
-        ASSERT(ps->GameLibraryState.ReloadCount == game_state->InternalDetectedReload);
-        game_state->InternalDetectedReload++;
-    }
-
-    ImGui::SetCurrentContext((ImGuiContext*)ps->ImGuiState.Context);
-    ImGui::SetAllocatorFunctions(ps->ImGuiState.AllocFunc, ps->ImGuiState.FreeFunc);
-
-    printf("[game] OnSOLoaded\n");
-    return true;
-}
-
-KDK_API bool OnSOUnloaded(kdk::PlatformState* ps) {
-    (void)ps;
-    kdk::SetGlobalPlatformState(nullptr);
-
-    printf("[game] OnSOUnloaded\n");
-    return true;
-}
-
-}  // extern "C"
+}  // namespace kdk

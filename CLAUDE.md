@@ -42,6 +42,7 @@ bazel build //...     # build without running tests
 
 - After completing a task (once all changes are done, not after each individual substep), run
   `bazel test //...` to verify everything compiles and tests pass.
+- Do not generate tests unless explicitly prompted.
 
 ## Code conventions
 
@@ -54,6 +55,9 @@ bazel build //...     # build without running tests
 - X macros used heavily for type registration (entity types, component types, asset types)
 - Arena-based allocation — prefer `Arena*` + member methods (e.g. `arena->Push`) over `new`/`delete`
 - No comments unless the WHY is non-obvious
+- No logic in headers. Function definitions with real logic live in a `.cpp`. Headers may only hold
+  templates (which have to be in a header) and trivial one-line functions (simple accessors /
+  forwarders, e.g. `Add`, `Neighbour`, `operator==`).
 - No anonymous namespaces. File-local helpers go in a `<name_of_file>_private` namespace instead
   (`game_library.cpp` → `game_library_private`), so the translation unit is named at the call site:
 

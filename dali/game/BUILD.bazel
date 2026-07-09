@@ -4,6 +4,8 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 cc_library(
     name = "lib",
     srcs = [
+        "game.cpp",
+        "hex.cpp",
         "log.cpp",
         "platform_state.cpp",
     ],
@@ -25,7 +27,7 @@ cc_library(
 cc_binary(
     name = "game.dll",
     srcs = [
-        "game.cpp",
+        "entrypoint.cpp",
     ],
     linkshared = True,
     visibility = ["//dali:__subpackages__"],
