@@ -23,6 +23,9 @@ struct Tile {
 
 	int PathDirection = NONE;
 	ETileContent Content = ETileContent::None;
+	// Seconds accumulated toward this spawner's next spawn. Seeded with a random phase offset (see
+	// MakeSpawner) so spawners fire out of sync. Only meaningful when Content == Spawner.
+	float SpawnTimer = 0.0f;
 };
 
 struct Grid {
@@ -53,7 +56,6 @@ struct World {
 	std::optional<Hex> Goal = {};
 
 	FixedVector<Enemy, kMaxEnemies> Enemies = {};
-	float SpawnTimer = 0.0f;  // Seconds accumulated toward the next spawn.
 
     // Sets up the M01 level: a radius-3 grid with a hardcoded straight diameter path (spawn at one
     // edge, through the center, base at the opposite edge).
@@ -64,11 +66,15 @@ struct World {
 	void CalculatePath();
 
 	void SpawnEnemy(Hex at);
-	// Accumulates dt; every spawn interval, spawns one enemy from each spawner tile.
+	// Advances each spawner's own timer by dt; spawns one enemy from a spawner when its timer wraps.
 	void UpdateSpawners(float dt);
 	// Advances each enemy along the flow field; despawns those that reach the goal.
 	void UpdateEnemies(float dt);
 };
+
+// Marks |tile| as a spawner and seeds its SpawnTimer with a random [0,1)s phase offset, so multiple
+// spawners fire out of sync instead of stacking enemies. Use this instead of setting Content by hand.
+void MakeSpawner(Tile* tile);
 
 enum class EOperationMode : u8 {
 	TogglePath,

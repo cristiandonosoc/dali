@@ -55,6 +55,10 @@ bazel build //...     # build without running tests
 - X macros used heavily for type registration (entity types, component types, asset types)
 - Arena-based allocation — prefer `Arena*` + member methods (e.g. `arena->Push`) over `new`/`delete`
 - No comments unless the WHY is non-obvious
+- No exceptions. The project is built without exception support, so never use `try` / `catch` /
+  `throw`. Signal failure with a return value (bool, sentinel, `std::optional`). When a third-party
+  library can throw (e.g. yaml-cpp), call it through its non-throwing API (e.g. yaml-cpp's
+  `Node::as<T>(fallback)`) rather than wrapping it in try/catch.
 - No logic in headers. Function definitions with real logic live in a `.cpp`. Headers may only hold
   templates (which have to be in a header) and trivial one-line functions (simple accessors /
   forwarders, e.g. `Add`, `Neighbour`, `operator==`).

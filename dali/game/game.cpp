@@ -222,15 +222,19 @@ void World::SpawnEnemy(Hex at) {
     Enemies.Push(enemy);
 }
 
-void World::UpdateSpawners(float dt) {
-    SpawnTimer += dt;
-    if (SpawnTimer < kSpawnInterval) {
-        return;
-    }
-    SpawnTimer -= kSpawnInterval;
+void MakeSpawner(Tile* tile) {
+    tile->Content = ETileContent::Spawner;
+    tile->SpawnTimer = random::FloatUNI();  // phase offset in [0,1)s so spawners don't sync up
+}
 
-    for (const Tile& tile : Grid.Tiles) {
-        if (tile.Content == ETileContent::Spawner) {
+void World::UpdateSpawners(float dt) {
+    for (Tile& tile : Grid.Tiles) {
+        if (tile.Content != ETileContent::Spawner) {
+            continue;
+        }
+        tile.SpawnTimer += dt;
+        if (tile.SpawnTimer >= kSpawnInterval) {
+            tile.SpawnTimer -= kSpawnInterval;
             SpawnEnemy(tile.Hex);
         }
     }
@@ -339,7 +343,7 @@ void GameRender(PlatformState* ps, GameState* gs) {
                         tile->Content = ETileContent::None;
                     } else if (tile->IsPath) {
                         // Only path tiles can host a spawner. Placing it replaces any other content.
-                        tile->Content = ETileContent::Spawner;
+                        MakeSpawner(tile);
                     }
                     break;
                 }

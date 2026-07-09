@@ -49,27 +49,31 @@ bool LoadScene(World* world, StringView path) {
     world->Grid.InitRing(3);
     world->Goal = {};
     world->Enemies.Clear();
-    world->SpawnTimer = 0.0f;
 
-    try {
-        YAML::Node root = YAML::Load(file);
+    // We build without exceptions, so use the non-throwing as<T>(fallback) accessors — as<T>() throws
+    // on a missing/mistyped field. The file is our own throwaway output, so anything unexpected just
+    // resolves to defaults rather than a crash.
+    YAML::Node root = YAML::Load(file);
 
-        if (root["goal"] && root["goal"].size() == 2) {
-            world->Goal = Hex{root["goal"][0].as<int>(), root["goal"][1].as<int>()};
-        }
-        if (root["tiles"]) {
-            for (const auto& node : root["tiles"]) {
-                Hex hex{node["q"].as<int>(), node["r"].as<int>()};
-                Tile* tile = world->Grid.FindTile(hex);
-                if (!tile) {
-                    continue;
-                }
-                tile->IsPath = node["path"].as<int>() != 0;
-                tile->Content = (ETileContent)node["content"].as<int>();
+    if (root["goal"] && root["goal"].size() == 2) {
+        world->Goal = Hex{root["goal"][0].as<int>(0), root["goal"][1].as<int>(0)};
+    }
+    if (root["tiles"]) {
+        for (const auto& node : root["tiles"]) {
+            Hex hex{node["q"].as<int>(0), node["r"].as<int>(0)};
+            Tile* tile = world->Grid.FindTile(hex);
+            if (!tile) {
+                continue;
+            }
+            tile->IsPath = node["path"].as<int>(0) != 0;
+
+            ETileContent content = (ETileContent)node["content"].as<int>(0);
+            if (content == ETileContent::Spawner) {
+                MakeSpawner(tile);  // re-seed the random phase offset on load
+            } else {
+                tile->Content = content;
             }
         }
-    } catch (const std::exception&) {
-        return false;
     }
 
     world->CalculatePath();
