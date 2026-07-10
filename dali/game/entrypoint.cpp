@@ -17,7 +17,7 @@
 extern "C" {
 
 KDK_API bool OnGameInit(kdk::PlatformState* ps) {
-    auto* game_state = ps->Memory.PermanentArena.PushZero<kdk::GameState>();
+    auto* game_state = ps->Memory.PermanentArena.PushInit<kdk::GameState>();
     ps->GameState = game_state;
     kdk::GameInit(ps, game_state);
     return true;

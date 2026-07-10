@@ -52,23 +52,35 @@ struct Enemy {
     int Reward = 5;           // Gold granted to the player when a tower kills this enemy.
 };
 
-// A tower shot in flight. Homes on the enemy with Id == TargetId every frame; on a distance check
-// against that enemy it applies Damage and despawns. If the target dies first (no such Id), the
-// projectile despawns without effect.
+// A tower shot in flight. Each frame it refreshes LastSeen to the live target's position and flies
+// toward it; on a distance check it applies Damage and despawns. If the target dies mid-flight the
+// shot keeps flying to the last position it saw and despawns there without effect, so it lands
+// visually instead of popping out of existence.
 struct Projectile {
-    Vec2 Position = {};    // World space, same frame as Enemy::Position.
+    Vec2 Position = {};  // World space, same frame as Enemy::Position.
+    Vec2 LastSeen = {};  // Target's position as of the last frame it was alive; the shot flies here.
     u32 TargetId = 0;      // The enemy this shot is chasing.
     float Speed = 320.0f;  // Pixels per second.
     float Damage = 5.0f;
+};
+
+// One wave of enemies: a finite burst emitted from the map's spawn sources during the Wave phase.
+struct Wave {
+    int Number = 0;    // 1-based once armed; 0 means no wave has run yet.
+    int ToSpawn = 0;   // Enemies left to emit this wave; the wave ends when this hits 0 and none
+                       // remain alive.
+    float SpawnTimer = 0.0f;  // Counts up to Cadence, then emits one enemy and wraps.
+    float Cadence = 0.6f;     // Seconds between emissions.
+    int SpawnCursor = 0;      // Round-robins emissions across SpawnSources when there are several.
 };
 
 struct World {
     static constexpr i32 kMaxPathTiles = 16;
     static constexpr i32 kMaxEnemies = 128;
     static constexpr i32 kMaxProjectiles = 256;
+    static constexpr i32 kMaxSpawnSources = 8;
     static constexpr float kMaxBaseHealth = 100.0f;
 
-    int Count = 0;
     // The base's HP. Each enemy that reaches the goal subtracts its damage; it never goes below 0.
     float BaseHealth = kMaxBaseHealth;
     // Player currency. Grows by an enemy's Reward each time a tower kills one.
@@ -82,6 +94,11 @@ struct World {
     FixedVector<Enemy, kMaxEnemies> Enemies = {};
     FixedVector<Projectile, kMaxProjectiles> Projectiles = {};
 
+    Wave Wave = {};
+    // The tiles enemies emit from: path "leaves" that nothing flows into, derived from the flow
+    // field by CollectSpawnSources. These are the map's outskirts.
+    FixedVector<Hex, kMaxSpawnSources> SpawnSources = {};
+
     // Sets up the M01 level: a radius-3 grid with a hardcoded straight diameter path (spawn at one
     // edge, through the center, base at the opposite edge).
     void InitLevel();
@@ -91,12 +108,22 @@ struct World {
     // NONE.
     void CalculatePath();
 
-    void SpawnEnemy(Hex at);
+    void SpawnEnemy(Hex at, float health_scale = 1.0f);
     // Returns the live enemy with |id|, or nullptr if it has despawned/died. Linear scan.
     Enemy* FindEnemy(u32 id);
-    // Advances each spawner's own timer by dt; spawns one enemy from a spawner when its timer
-    // wraps.
-    void UpdateSpawners(float dt);
+    // Resets per-run state (gold, base health, wave, live entities) and strips placed towers, then
+    // recomputes the path and spawn sources. Call when leaving PreGame for Build.
+    void BeginRun();
+    // Rebuilds SpawnSources from the current flow field: every path tile that no other path tile
+    // flows into.
+    void CollectSpawnSources();
+    // Advances to the next wave: bumps the number and seeds how many enemies it will emit.
+    void ArmNextWave();
+    // Sets every tower's FireCooldown to 0 (ready). Called when entering Build so each wave starts
+    // with towers ready rather than mid-cooldown from the last one.
+    void ResetTowerCooldowns();
+    // During the Wave phase, drips this wave's enemies from the spawn sources on the cadence.
+    void UpdateWave(float dt);
     // Advances each enemy along the flow field; despawns those that reach the goal.
     void UpdateEnemies(float dt);
     // Ticks each tower's cooldown; a ready tower fires a projectile at the nearest enemy in range.
@@ -130,8 +157,27 @@ constexpr EOperationMode kOperationModes[] = {
     EOperationMode::ToggleTower,
 };
 
+// Top-level game flow: PreGame -> Build <-> Wave -> GameOver. PreGame is the setup/editor phase;
+// Build and Wave alternate (place towers, then fight a wave); GameOver ends the run.
+enum class EGamePhase : u8 {
+    PreGame,
+    Build,
+    Wave,
+    GameOver,
+};
+StringView ToString(EGamePhase phase);
+
 struct GameState {
+    EGamePhase Phase = EGamePhase::PreGame;
     EOperationMode CurrentOperation = EOperationMode::TogglePath;
+
+    // Screen-space camera pan (WASD). Added to the world's draw origin, so it offsets both what is
+    // rendered and where clicks land.
+	bool InverseCameraMovement = false;
+    Vec2 Camera = {};
+    // World->screen scale (mouse wheel). The sim stays in world units; only rendering and picking
+    // scale by this.
+    float Zoom = 1.0f;
 
     World World = {};
     int InternalDetectedReload = 0;

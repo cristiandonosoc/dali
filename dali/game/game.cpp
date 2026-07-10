@@ -13,16 +13,29 @@
 
 namespace kdk {
 
-// World unit == pixel: a hex center-to-corner spans this many pixels. Shared by the sim (enemy
-// movement, spawn placement) and the debug renderer so both agree on where tiles sit.
+// Hex center-to-corner distance in WORLD units. The sim runs entirely in world units (enemy
+// movement, ranges, spawn placement); the renderer converts to pixels as world * zoom. At zoom 1 a
+// world unit is one pixel.
 constexpr float kHexSize = 60.0f;
-constexpr float kSpawnInterval = 1.0f;  // Seconds between spawns, per spawner.
 
 // Tower tuning. Range is in world units (pixels); at kHexSize=60 a range of 180 reaches ~3 tiles.
 constexpr float kTowerRange = 180.0f;
 constexpr float kTowerFireInterval = 0.6f;    // Seconds between shots.
 constexpr float kTowerDamage = 5.0f;          // Per projectile; enemies start at 10 HP.
 constexpr float kProjectileHitRadius = 8.0f;  // Distance at which a projectile connects.
+
+// Economy + wave tuning.
+constexpr int kStartingGold = 100;                // Gold the player begins a run with.
+constexpr int kTowerCost = 40;                    // Gold to place one tower.
+constexpr int kWaveBaseCount = 5;                 // Enemies in wave 1; grows by 1 each wave.
+constexpr float kWaveHealthScalePerWave = 0.15f;  // +15% enemy HP for each wave past the first.
+
+// UI / camera.
+constexpr float kSidePanelWidth = 320.0f;  // Width of the docked left control panel, in pixels.
+constexpr float kCameraPanSpeed = 500.0f;  // WASD camera pan speed, pixels per second.
+constexpr float kZoomStep = 0.1f;          // Fractional zoom change per mouse-wheel notch.
+constexpr float kZoomMin = 0.3f;           // Clamp so the world can't collapse or invert.
+constexpr float kZoomMax = 3.0f;
 
 namespace game_private {
 
@@ -84,23 +97,30 @@ void DrawHealthBar(ImDrawList* draw_list,
 // highlighted, which also proves the world<->hex transform round-trips.
 //
 // Returns clicked hex.
-std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world) {
+std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, float zoom) {
     std::optional<Hex> result = {};
 
     ImGuiIO& io = ImGui::GetIO();
-    Vec2 origin(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
+    // Center the world in the area right of the docked panel, then apply the camera pan. Clicks use
+    // the same origin + zoom below, so rendering and picking stay in lockstep.
+    Vec2 origin(kSidePanelWidth + (io.DisplaySize.x - kSidePanelWidth) * 0.5f + camera.x,
+                io.DisplaySize.y * 0.5f + camera.y);
 
-    // Which hex is under the mouse? Invert the exact transform used to place the tiles, so the
+    // World->screen: the sim is in zoom-independent world units; pixels are origin + world * zoom.
+    auto world_to_screen = [&](Vec2 w) -> ImVec2 {
+        return ImVec2(origin.x + w.x * zoom, origin.y + w.y * zoom);
+    };
+
+    // Which hex is under the mouse? Invert the exact transform (undo zoom, then origin) so the
     // highlight lines up regardless of the screen's Y-down convention.
-    Vec2 mouse_relative(io.MousePos.x - origin.x, io.MousePos.y - origin.y);
-    Hex hovered = Hex::WorldToHex(kHexSize, mouse_relative);
+    Vec2 mouse_world((io.MousePos.x - origin.x) / zoom, (io.MousePos.y - origin.y) / zoom);
+    Hex hovered = Hex::WorldToHex(kHexSize, mouse_world);
 
     ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
 
     // A tile-center in screen space. Shared by the grid pass and the path spine so they line up.
     auto tile_center = [&](Hex hex) -> ImVec2 {
-        Vec2 w = Hex::HexToWorld(kHexSize, hex);
-        return ImVec2(origin.x + w.x, origin.y + w.y);
+        return world_to_screen(Hex::HexToWorld(kHexSize, hex));
     };
 
     for (const Tile& tile : world->Grid.Tiles) {
@@ -108,7 +128,7 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world) {
 
         ImVec2 corners[6];
         for (int i = 0; i < 6; ++i) {
-            Vec2 c = Hex::HexCorner(kHexSize, Vec2(center.x, center.y), i);
+            Vec2 c = Hex::HexCorner(kHexSize * zoom, Vec2(center.x, center.y), i);
             corners[i] = ImVec2(c.x, c.y);
         }
 
@@ -118,8 +138,12 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world) {
             fill = Color32::Sienna;
         }
         if (tile.Hex == hovered) {
-            if (ps->Input.IsMousePressed(EMouseButton::Left)) {
-                result = tile.Hex;
+            // Ignore clicks ImGui is consuming (e.g. over the docked panel), so the grid behind it
+            // isn't clicked through.
+            if (!io.WantCaptureMouse) {
+                if (ps->Input.IsMousePressed(EMouseButton::Left)) {
+                    result = tile.Hex;
+                }
             }
 
             fill = Color32::Gold;
@@ -137,7 +161,7 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world) {
         }
         ImVec2 center = tile_center(tile.Hex);
         ImVec2 toward = tile_center(tile.Hex.Neighbour(tile.PathDirection));
-        DrawArrow(draw_list, center, toward, kHexSize, Color32::BrightGold);
+        DrawArrow(draw_list, center, toward, kHexSize * zoom, Color32::BrightGold);
     }
 
     // Buildings: a tile holds at most one. Spawners (enemy origins) are green discs; towers are
@@ -145,43 +169,58 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world) {
     for (const Tile& tile : world->Grid.Tiles) {
         ImVec2 center = tile_center(tile.Hex);
         if (tile.Content == ETileContent::Spawner) {
-            draw_list->AddCircleFilled(center, 10.0f, Color32::Green.Bits);
-            draw_list->AddCircle(center, 10.0f, Color32::White.Bits, 0, 2.0f);
+            draw_list->AddCircleFilled(center, 10.0f * zoom, Color32::Green.Bits);
+            draw_list->AddCircle(center, 10.0f * zoom, Color32::White.Bits, 0, 2.0f);
         } else if (tile.Content == ETileContent::Tower) {
             // The range ring only shows while hovering this tower, so a dense field stays readable.
             if (tile.Hex == hovered) {
-                draw_list->AddCircle(center, kTowerRange, Color32::Cyan.Bits, 0, 2.0f);
+                draw_list->AddCircle(center, kTowerRange * zoom, Color32::Cyan.Bits, 0, 2.0f);
             }
-            draw_list->AddCircleFilled(center, 10.0f, Color32::SteelBlue.Bits);
-            draw_list->AddCircle(center, 10.0f, Color32::White.Bits, 0, 2.0f);
+            draw_list->AddCircleFilled(center, 10.0f * zoom, Color32::SteelBlue.Bits);
+            draw_list->AddCircle(center, 10.0f * zoom, Color32::White.Bits, 0, 2.0f);
+
+            // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
+            // visible at a glance.
+            char cooldown_label[16];
+            snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tile.FireCooldown);
+            draw_list->AddText(ImVec2(center.x + 12.0f * zoom, center.y - 8.0f * zoom),
+                               Color32::White.Bits,
+                               cooldown_label);
         }
+    }
+
+    // Spawn sources: the outskirt tiles waves emit from (derived path leaves). A green ring marks
+    // each so you can see where enemies will enter.
+    for (const Hex& source : world->SpawnSources) {
+        ImVec2 center = tile_center(source);
+        draw_list->AddCircle(center, kHexSize * 0.55f * zoom, Color32::Green.Bits, 6, 3.0f);
     }
 
     // The goal: the tile every path drains into. Its base-health bar is always shown so you can
     // watch it drop as enemies break through.
     if (world->Goal.has_value()) {
         ImVec2 center = tile_center(*world->Goal);
-        draw_list->AddCircleFilled(center, 9.0f, Color32::Red.Bits);
+        draw_list->AddCircleFilled(center, 9.0f * zoom, Color32::Red.Bits);
         DrawHealthBar(draw_list,
                       center.x,
-                      center.y - 18.0f,
-                      28.0f,
+                      center.y - 18.0f * zoom,
+                      28.0f * zoom,
                       world->BaseHealth / World::kMaxBaseHealth,
                       Color32::Green);
     }
 
     // Enemies walking the flow field from spawner toward the goal.
     for (const Enemy& enemy : world->Enemies) {
-        ImVec2 p(origin.x + enemy.Position.x, origin.y + enemy.Position.y);
-        draw_list->AddCircleFilled(p, 6.0f, Color32::OrangeRed.Bits);
-        draw_list->AddCircle(p, 6.0f, Color32::Black.Bits, 0, 1.5f);
+        ImVec2 p = world_to_screen(enemy.Position);
+        draw_list->AddCircleFilled(p, 6.0f * zoom, Color32::OrangeRed.Bits);
+        draw_list->AddCircle(p, 6.0f * zoom, Color32::Black.Bits, 0, 1.5f);
 
         // Health bar, only once the enemy has taken damage (a full bar would just be clutter).
         if (enemy.MaxHealth > 0.0f && enemy.Health < enemy.MaxHealth) {
             DrawHealthBar(draw_list,
                           p.x,
-                          p.y - 12.0f,
-                          18.0f,
+                          p.y - 12.0f * zoom,
+                          18.0f * zoom,
                           enemy.Health / enemy.MaxHealth,
                           Color32::Green);
         }
@@ -189,8 +228,8 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world) {
 
     // Tower projectiles in flight toward their targets.
     for (const Projectile& projectile : world->Projectiles) {
-        ImVec2 p(origin.x + projectile.Position.x, origin.y + projectile.Position.y);
-        draw_list->AddCircleFilled(p, 3.0f, Color32::Yellow.Bits);
+        ImVec2 p = world_to_screen(projectile.Position);
+        draw_list->AddCircleFilled(p, 3.0f * zoom, Color32::Yellow.Bits);
     }
 
     return result;
@@ -277,14 +316,16 @@ void World::CalculatePath() {
     }
 }
 
-void World::SpawnEnemy(Hex at) {
+void World::SpawnEnemy(Hex at, float health_scale) {
     if (Enemies.IsFull()) {
         return;
     }
     Enemy enemy = {};
-    enemy.Id = NextEnemyId++;
+    enemy.Id = NextEnemyId;
+    NextEnemyId++;
     enemy.Position = Hex::HexToWorld(kHexSize, at);
     enemy.Target = at;  // retargets to the next flow-field tile on the first update
+    enemy.Health = enemy.Health * health_scale;
     enemy.MaxHealth = enemy.Health;
     Enemies.Push(enemy);
 }
@@ -311,17 +352,98 @@ void MakeTower(Tile* tile) {
     tile->FireCooldown = 0.0f;  // ready to fire the moment an enemy walks into range
 }
 
-void World::UpdateSpawners(float dt) {
+void World::BeginRun() {
+    Gold = kStartingGold;
+    BaseHealth = kMaxBaseHealth;
+    Wave = {};
+    Enemies.Clear();
+    Projectiles.Clear();
+
+    // Start with no towers; PreGame only lays out terrain (path + goal).
     for (Tile& tile : Grid.Tiles) {
-        if (tile.Content != ETileContent::Spawner) {
+        tile.Content = ETileContent::None;
+    }
+
+    CalculatePath();
+    CollectSpawnSources();
+}
+
+void World::CollectSpawnSources() {
+    SpawnSources.Clear();
+    for (Tile& tile : Grid.Tiles) {
+        if (!tile.IsPath) {
             continue;
         }
-        tile.SpawnTimer += dt;
-        if (tile.SpawnTimer >= kSpawnInterval) {
-            tile.SpawnTimer -= kSpawnInterval;
-            SpawnEnemy(tile.Hex);
+        if (tile.PathDirection == NONE) {
+            continue;  // no route to the goal, so nothing spawns here
         }
+
+        // A source is a path tile that no neighbouring path tile flows into.
+        bool has_incoming = false;
+        for (int dir = 0; dir < 6; ++dir) {
+            Tile* neighbour = Grid.FindTile(tile.Hex.Neighbour(dir));
+            if (!neighbour) {
+                continue;
+            }
+            if (!neighbour->IsPath) {
+                continue;
+            }
+            if (neighbour->PathDirection == NONE) {
+                continue;
+            }
+            Hex flows_to = neighbour->Hex.Neighbour(neighbour->PathDirection);
+            if (flows_to == tile.Hex) {
+                has_incoming = true;
+                break;
+            }
+        }
+
+        if (has_incoming) {
+            continue;
+        }
+        if (SpawnSources.IsFull()) {
+            continue;
+        }
+        SpawnSources.Push(tile.Hex);
     }
+}
+
+void World::ArmNextWave() {
+    Wave.Number++;
+    Wave.ToSpawn = kWaveBaseCount + Wave.Number;
+    Wave.SpawnTimer = 0.0f;
+}
+
+void World::ResetTowerCooldowns() {
+    for (Tile& tile : Grid.Tiles) {
+        if (tile.Content != ETileContent::Tower) {
+            continue;
+        }
+        tile.FireCooldown = 0.0f;
+    }
+}
+
+void World::UpdateWave(float dt) {
+    if (Wave.ToSpawn <= 0) {
+        return;
+    }
+    if (SpawnSources.IsEmpty()) {
+        return;
+    }
+
+    Wave.SpawnTimer += dt;
+    if (Wave.SpawnTimer < Wave.Cadence) {
+        return;
+    }
+    Wave.SpawnTimer -= Wave.Cadence;
+
+    int index = Wave.SpawnCursor % SpawnSources.Size;
+    Wave.SpawnCursor++;
+    Hex source = SpawnSources[index];
+
+    float health_scale = 1.0f + kWaveHealthScalePerWave * (float)(Wave.Number - 1);
+    SpawnEnemy(source, health_scale);
+    Wave.ToSpawn--;
 }
 
 void World::UpdateEnemies(float dt) {
@@ -381,8 +503,11 @@ void World::UpdateTowers(float dt) {
 
         tile.FireCooldown -= dt;
         if (tile.FireCooldown > 0.0f) {
-            continue;
+            continue;  // still cooling down
         }
+        // Ready to fire. Clamp to 0 so a tower with no target in range holds at "ready" instead of
+        // drifting ever more negative while it waits.
+        tile.FireCooldown = 0.0f;
 
         // Among enemies in range, pick the one closest to the base. Compare squared distances to
         // skip the sqrt.
@@ -408,6 +533,8 @@ void World::UpdateTowers(float dt) {
 
         Projectile projectile = {};
         projectile.Position = tower_pos;
+        projectile.LastSeen =
+            target->Position;  // seed; refreshed each frame while the target lives
         projectile.TargetId = target->Id;
         projectile.Damage = kTowerDamage;
         Projectiles.Push(projectile);
@@ -419,18 +546,22 @@ void World::UpdateProjectiles(float dt) {
     for (i32 i = 0; i < Projectiles.Size;) {
         Projectile& projectile = Projectiles[i];
 
+        // Refresh the aim point while the target is alive; once it dies we keep the last one so the
+        // shot still flies out and lands instead of vanishing.
         Enemy* target = FindEnemy(projectile.TargetId);
-        if (!target) {
-            Projectiles.RemoveUnorderedAt(i);  // target died/escaped before we reached it
-            continue;
+        if (target) {
+            projectile.LastSeen = target->Position;
         }
 
-        Vec2 delta = target->Position - projectile.Position;
+        Vec2 delta = projectile.LastSeen - projectile.Position;
         if (LengthSq(delta) <= kProjectileHitRadius * kProjectileHitRadius) {
-            target->Health -= projectile.Damage;
-            if (target->Health <= 0.0f) {
-                Gold += target->Reward;  // bounty for the kill
-                Enemies.RemoveUnorderedAt((i32)(target - Enemies.begin()));
+            // Reached the aim point. Only deal damage if the target is still there to take it.
+            if (target) {
+                target->Health -= projectile.Damage;
+                if (target->Health <= 0.0f) {
+                    Gold += target->Reward;  // bounty for the kill
+                    Enemies.RemoveUnorderedAt((i32)(target - Enemies.begin()));
+                }
             }
             Projectiles.RemoveUnorderedAt(i);
             continue;
@@ -451,6 +582,7 @@ void GameInit(PlatformState* ps, GameState* gs) {
     if (!LoadScene(&gs->World, kScenePath)) {
         gs->World.InitLevel();
     }
+    gs->World.CollectSpawnSources();  // so the outskirts are visible before the first path edit
 
     printf("[game] GameInit\n");
 }
@@ -459,11 +591,52 @@ void GameUpdate(PlatformState* ps, GameState* gs) {
     float dt = (float)ps->TimeTracking.DeltaSeconds;
 
     World& world = gs->World;
-    world.Count++;
-    world.UpdateSpawners(dt);
+
+    // Camera pan (WASD) works in every phase: it just offsets the world's draw origin. W/A pan the
+    // view up/left (content slides down/right), S/D the opposite.
+    Vec2 pan = {};
+    float multiple = gs->InverseCameraMovement ? -1.0f : 1.0f;
+    if (ps->Input.IsKeyDown(EKey::W)) {
+        pan.y += 1.0f * multiple;
+    }
+    if (ps->Input.IsKeyDown(EKey::S)) {
+        pan.y -= 1.0f * multiple;
+    }
+    if (ps->Input.IsKeyDown(EKey::A)) {
+        pan.x += 1.0f * multiple;
+    }
+    if (ps->Input.IsKeyDown(EKey::D)) {
+        pan.x -= 1.0f * multiple;
+    }
+    gs->Camera.x += pan.x * kCameraPanSpeed * dt;
+    gs->Camera.y += pan.y * kCameraPanSpeed * dt;
+
+    // Mouse-wheel zoom, unless ImGui is using the wheel (e.g. hovering the docked panel). Zoom only
+    // scales the world->screen mapping; the sim stays in world units.
+    if (!ps->Input.MouseOverride) {
+        float scroll = ps->Input.MouseScroll.y;
+        gs->Zoom *= (1.0f + kZoomStep * scroll);
+        gs->Zoom = Clamp(gs->Zoom, kZoomMin, kZoomMax);
+    }
+
+    if (gs->Phase != EGamePhase::Wave) {
+        return;  // PreGame / Build / GameOver freeze the sim
+    }
+
+    world.UpdateWave(dt);
     world.UpdateEnemies(dt);
     world.UpdateTowers(dt);
     world.UpdateProjectiles(dt);
+
+    if (world.BaseHealth <= 0.0f) {
+        gs->Phase = EGamePhase::GameOver;
+        return;
+    }
+    if (world.Wave.ToSpawn == 0 && world.Enemies.Size == 0) {
+        world.Projectiles.Clear();
+        world.ResetTowerCooldowns();
+        gs->Phase = EGamePhase::Build;  // wave cleared; back to building
+    }
 }
 
 StringView ToString(EOperationMode mode) {
@@ -479,101 +652,208 @@ StringView ToString(EOperationMode mode) {
     return "<unknown>"sv;
 }
 
+StringView ToString(EGamePhase phase) {
+    // clang-format off
+    switch (phase) {
+        case EGamePhase::PreGame:  return "PreGame"sv;
+        case EGamePhase::Build:    return "Build"sv;
+        case EGamePhase::Wave:     return "Wave"sv;
+        case EGamePhase::GameOver: return "GameOver"sv;
+    }
+    // clang-format on
+    ASSERT(false);
+    return "<unknown>"sv;
+}
+
+namespace game_private {
+
+// PreGame terrain editor: applies the current operation to the clicked tile. This is the M01
+// editor, now scoped to the setup phase.
+void ApplyEditorOp(GameState* gs, Hex hex) {
+    Tile* tile = gs->World.Grid.FindTile(hex);
+    if (!tile) {
+        return;
+    }
+
+    switch (gs->CurrentOperation) {
+        case EOperationMode::TogglePath: {
+            FLIP_BOOL(tile->IsPath);
+            // A spawner can only sit on a path tile, so it goes when the path does.
+            if (!tile->IsPath) {
+                if (tile->Content == ETileContent::Spawner) {
+                    tile->Content = ETileContent::None;
+                }
+            }
+            gs->World.CalculatePath();
+            gs->World.CollectSpawnSources();
+            break;
+        }
+        case EOperationMode::SetPathGoal: {
+            // The goal is a path tile every route drains into; make it path and re-flood.
+            tile->IsPath = true;
+            gs->World.Goal = hex;
+            gs->World.CalculatePath();
+            gs->World.CollectSpawnSources();
+            break;
+        }
+        case EOperationMode::ToggleSpawner: {
+            if (tile->Content == ETileContent::Spawner) {
+                tile->Content = ETileContent::None;
+            } else if (tile->IsPath) {
+                // Only path tiles can host a spawner. Placing it replaces any other content.
+                MakeSpawner(tile);
+            }
+            break;
+        }
+        case EOperationMode::ToggleTower: {
+            if (tile->Content == ETileContent::Tower) {
+                tile->Content = ETileContent::None;
+            } else if (!tile->IsPath) {
+                // Towers guard the path from beside it, so they only go on non-path tiles.
+                MakeTower(tile);
+            }
+            break;
+        }
+    }
+}
+
+// Build-phase interaction: buy a tower on an empty, non-path tile if the player can afford it.
+void TryBuyTower(World* world, Hex hex) {
+    Tile* tile = world->Grid.FindTile(hex);
+    if (!tile) {
+        return;
+    }
+    if (tile->IsPath) {
+        return;
+    }
+    if (tile->Content != ETileContent::None) {
+        return;
+    }
+    if (world->Gold < kTowerCost) {
+        return;
+    }
+    world->Gold -= kTowerCost;
+    MakeTower(tile);
+}
+
+}  // namespace game_private
+
 void GameRender(PlatformState* ps, GameState* gs) {
     using namespace game_private;
     (void)ps;
 
-    auto clicked_hex = DrawHexGrid(ps, &gs->World);
+    World& world = gs->World;
+
+    std::optional<Hex> clicked_hex = DrawHexGrid(ps, &world, gs->Camera, gs->Zoom);
     if (clicked_hex.has_value()) {
-        if (Tile* tile = gs->World.Grid.FindTile(*clicked_hex)) {
-            switch (gs->CurrentOperation) {
-                case EOperationMode::TogglePath: {
-                    FLIP_BOOL(tile->IsPath);
-                    // A spawner can only sit on a path tile, so it goes when the path does.
-                    if (!tile->IsPath && tile->Content == ETileContent::Spawner) {
-                        tile->Content = ETileContent::None;
-                    }
-                    gs->World.CalculatePath();
-                    break;
-                }
-                case EOperationMode::SetPathGoal: {
-                    // The goal is a path tile every route drains into; make it path and re-flood.
-                    tile->IsPath = true;
-                    gs->World.Goal = *clicked_hex;
-                    gs->World.CalculatePath();
-                    break;
-                }
-                case EOperationMode::ToggleSpawner: {
-                    if (tile->Content == ETileContent::Spawner) {
-                        tile->Content = ETileContent::None;
-                    } else if (tile->IsPath) {
-                        // Only path tiles can host a spawner. Placing it replaces any other
-                        // content.
-                        MakeSpawner(tile);
-                    }
-                    break;
-                }
-                case EOperationMode::ToggleTower: {
-                    if (tile->Content == ETileContent::Tower) {
-                        tile->Content = ETileContent::None;
-                    } else if (!tile->IsPath) {
-                        // Towers guard the path from beside it, so they only go on non-path tiles.
-                        MakeTower(tile);
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
-    ImGui::Begin("Dali");
-    ImGui::Text("Hello from the game DLL");
-    ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
-
-    if (ImGui::BeginCombo("Operation", ToString(gs->CurrentOperation).Str())) {
-        for (EOperationMode mode : kOperationModes) {
-            bool is_selected = gs->CurrentOperation == mode;
-            if (ImGui::Selectable(ToString(mode).Str(), is_selected)) {
-                gs->CurrentOperation = mode;
-            }
-            if (is_selected) {
-                ImGui::SetItemDefaultFocus();
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    if (ImGui::Button("Save Scene")) {
-        SaveScene(gs->World, kScenePath);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Load Scene")) {
-        LoadScene(&gs->World, kScenePath);
-    }
-
-    // Debug spawn: drop one crawler onto a spawner (or, failing that, any path tile that still has a
-    // route to the goal) so you can farm towers without waiting on the spawn timers.
-    if (ImGui::Button("Spawn Enemy")) {
-        Tile* origin = nullptr;
-        for (Tile& tile : gs->World.Grid.Tiles) {
-            if (tile.Content == ETileContent::Spawner) {
-                origin = &tile;
+        switch (gs->Phase) {
+            case EGamePhase::PreGame: {
+                ApplyEditorOp(gs, *clicked_hex);
                 break;
             }
-            if (!origin && tile.IsPath && tile.PathDirection != NONE) {
-                origin = &tile;  // fallback; keep scanning in case a real spawner shows up
+            case EGamePhase::Build: {
+                TryBuyTower(&world, *clicked_hex);
+                break;
             }
-        }
-        if (origin) {
-            gs->World.SpawnEnemy(origin->Hex);
+            case EGamePhase::Wave:
+            case EGamePhase::GameOver: {
+                break;  // no placement while a wave runs or after the run ends
+            }
         }
     }
 
-    ImGui::Text("Base Health: %.0f / %.0f", gs->World.BaseHealth, World::kMaxBaseHealth);
-    ImGui::Text("Gold: %d", gs->World.Gold);
-    ImGui::Text("Enemies: %d", gs->World.Enemies.Size);
-    ImGui::Text("World Count: %d", gs->World.Count);
-    ImGui::Text("DLL Reload Count: %d", gs->InternalDetectedReload);
+    // Dock the control panel to the full-height left edge as a fixed side window.
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(kSidePanelWidth, io.DisplaySize.y));
+    ImGuiWindowFlags panel_flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                                   ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
+    ImGui::Begin("Dali", nullptr, panel_flags);
+    ImGui::Text("%.1f FPS", io.Framerate);
+    ImGui::Text("Phase: %s", ToString(gs->Phase).Str());
+    ImGui::Text("WASD pan / wheel zoom (%.2fx)", gs->Zoom);
+    ImGui::Text("Base Health: %.0f / %.0f", world.BaseHealth, World::kMaxBaseHealth);
+    ImGui::Text("Gold: %d", world.Gold);
+    ImGui::Separator();
+
+    switch (gs->Phase) {
+        case EGamePhase::PreGame: {
+            if (ImGui::BeginCombo("Operation", ToString(gs->CurrentOperation).Str())) {
+                for (EOperationMode mode : kOperationModes) {
+                    bool is_selected = gs->CurrentOperation == mode;
+                    if (ImGui::Selectable(ToString(mode).Str(), is_selected)) {
+                        gs->CurrentOperation = mode;
+                    }
+                    if (is_selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            if (ImGui::Button("Save Scene")) {
+                SaveScene(world, kScenePath);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Load Scene")) {
+                LoadScene(&world, kScenePath);
+            }
+
+            // Lock in the terrain and start the run, but only if there's a goal and at least one
+            // spawn source for waves to come from.
+            if (ImGui::Button("Start Game")) {
+                world.CalculatePath();
+                world.CollectSpawnSources();
+                bool can_start = world.Goal.has_value();
+                can_start &= !world.SpawnSources.IsEmpty();
+                if (can_start) {
+                    world.BeginRun();
+                    gs->Phase = EGamePhase::Build;
+                }
+            }
+            break;
+        }
+        case EGamePhase::Build: {
+            ImGui::Text("Click an empty tile to build a tower (%d gold).", kTowerCost);
+            if (ImGui::Button("Start Wave")) {
+                world.ArmNextWave();
+                gs->Phase = EGamePhase::Wave;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Restart Game")) {
+                gs->Phase = EGamePhase::PreGame;
+            }
+            break;
+        }
+        case EGamePhase::Wave: {
+            ImGui::Text("Wave %d", world.Wave.Number);
+            ImGui::Text("To spawn: %d   Alive: %d", world.Wave.ToSpawn, world.Enemies.Size);
+            break;
+        }
+        case EGamePhase::GameOver: {
+            ImGui::Text("Game Over - survived %d waves.", world.Wave.Number);
+            if (ImGui::Button("Restart")) {
+                gs->Phase = EGamePhase::PreGame;
+            }
+            break;
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Debug", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Text("Enemies:     %d/%d", world.Enemies.Size, world.Enemies.kMaxSize);
+        ImGui::Text("Projectiles: %d/%d", world.Projectiles.Size, world.Projectiles.kMaxSize);
+        ImGui::Text("DLL Reload Count: %d", gs->InternalDetectedReload);
+
+        ImGui::Checkbox("Inverse Camera Movement", &gs->InverseCameraMovement);
+
+        // Drop one enemy on the first spawn source, to test firing without waiting on a wave.
+        if (ImGui::Button("Spawn Enemy")) {
+            if (!world.SpawnSources.IsEmpty()) {
+                world.SpawnEnemy(world.SpawnSources[0]);
+            }
+        }
+    }
+
     ImGui::End();
 }
 

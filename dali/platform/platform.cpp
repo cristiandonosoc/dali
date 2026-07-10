@@ -15,10 +15,6 @@ namespace kdk {
 
 namespace platform_private {
 
-const char kWindowName[] = "DALI";
-constexpr int kWindowWidth = 1024;
-constexpr int kWindowHeight = 728;
-
 // Owns the OS/GL handles behind Window::PlatformData. Kept out of dali/core/api.h since it's a
 // platform-only concern (SDL types can't cross the platform<->game contract).
 struct WindowPlatformData {
@@ -30,14 +26,14 @@ void Log(ELogSeverity severity, StringView message) {
     SDL_Log("[%s] %s", ToString(severity).Str(), message.Str());
 }
 
-bool InitWindow(PlatformState* ps) {
+bool InitWindow(PlatformState* ps, StringView window_name, int window_width, int window_height) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         SDL_Log("ERROR: Initializing SDL: %s\n", SDL_GetError());
         return false;
     }
 
     SDL_Window* sdl_window =
-        SDL_CreateWindow(kWindowName, kWindowWidth, kWindowHeight, SDL_WINDOW_OPENGL);
+        SDL_CreateWindow(window_name.Str(), window_width, window_height, SDL_WINDOW_OPENGL);
     if (!sdl_window) {
         SDL_Log("ERROR: Creating SDL Window: %s\n", SDL_GetError());
         return false;
@@ -81,9 +77,9 @@ bool InitWindow(PlatformState* ps) {
     platform_data->GLContext = gl_context;
 
     ResetStruct(&ps->MainWindow);
-    ps->MainWindow.Name = kWindowName;
-    ps->MainWindow.Width = kWindowWidth;
-    ps->MainWindow.Height = kWindowHeight;
+    ps->MainWindow.Name = window_name;
+    ps->MainWindow.Width = window_width;
+    ps->MainWindow.Height = window_height;
     ps->MainWindow.PlatformData = platform_data;
 
     return true;
@@ -144,7 +140,7 @@ void ShutdownImGui(PlatformState*) {
 
 }  // namespace platform_private
 
-bool PlatformInit(PlatformState* ps) {
+bool PlatformInit(PlatformState* ps, const PlatformInitConfig& config) {
     using namespace platform_private;
 
     ps->API.Log = Log;
@@ -156,7 +152,7 @@ bool PlatformInit(PlatformState* ps) {
     ps->Memory.PermanentArena = Arena::Allocate("PermanentArena"sv, 100 * MEGABYTE);
     ps->Memory.FrameArena = Arena::Allocate("FrameArena"sv, 50 * MEGABYTE);
 
-    if (!InitWindow(ps)) {
+    if (!InitWindow(ps, config.WindowName, config.WindowWidth, config.WindowHeight)) {
         SDL_Log("ERROR: Initializing window");
         return false;
     }
@@ -182,9 +178,9 @@ void PlatformShutdown(PlatformState* ps) {
 namespace platform_private {
 
 // EKey/EMouseButton mirror the SDL codes 1:1, so the poll loop below indexes the input bitsets with
-// the raw SDL values and needs no translation table. Verify that mirroring here — this is the one TU
-// that sees both dali/core/input.h and <SDL3/SDL.h>. If any of these fire, the enum in input.h has
-// drifted from SDL and must be fixed.
+// the raw SDL values and needs no translation table. Verify that mirroring here — this is the one
+// TU that sees both dali/core/input.h and <SDL3/SDL.h>. If any of these fire, the enum in input.h
+// has drifted from SDL and must be fixed.
 static_assert(kKeyCount == SDL_SCANCODE_COUNT);
 static_assert((u32)EKey::W == SDL_SCANCODE_W);
 static_assert((u32)EKey::Space == SDL_SCANCODE_SPACE);
@@ -305,7 +301,8 @@ void PlatformEndFrame(PlatformState* ps) {
     ImGui::Render();
 
     // TODO(cdc): Clear/viewport belong in the render layer once it exists — raw GL here is
-    // bootstrapping so ImGui has a defined backbuffer to draw onto. See CLAUDE.md render-layer rule.
+    // bootstrapping so ImGui has a defined backbuffer to draw onto. See CLAUDE.md render-layer
+    // rule.
     glViewport(0, 0, ps->MainWindow.Width, ps->MainWindow.Height);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

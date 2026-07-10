@@ -43,7 +43,9 @@ int main(int argc, const char* argv[]) {
     gPlatformState = (PlatformState*)malloc(sizeof(PlatformState));
     ResetStruct(gPlatformState);
 
-    if (!PlatformInit(gPlatformState)) {
+	PlatformInitConfig platform_init_config;
+	platform_init_config.WindowName = "DALI"sv;
+    if (!PlatformInit(gPlatformState, platform_init_config)) {
         return -1;
     }
 
