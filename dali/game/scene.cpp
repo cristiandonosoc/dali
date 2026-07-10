@@ -46,7 +46,7 @@ bool LoadScene(World* world, StringView path) {
         return false;  // no scene on disk yet
     }
 
-    world->Grid.InitRing(3);
+    world->Grid.InitRing();
     world->Goal = {};
     world->Enemies.Clear();
     world->Projectiles.Clear();

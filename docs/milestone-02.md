@@ -33,7 +33,22 @@ ships as the smallest thing that works and grows from there.
 
 ---
 
-## 2.1 — The game loop
+## 2.1 — The game loop  ✅ DONE
+
+**Landed as:** a four-phase flow `PreGame → Build ⇄ Wave → GameOver` (`EGamePhase` on `GameState`).
+PreGame is the terrain editor (the M01 `EOperationMode` tools) plus *Start Game*; `BeginRun` seeds
+gold/health, strips towers, and derives spawn sources. Waves (`Wave` on `World`) drip
+`kWaveBaseCount + N` enemies from flow-field-derived `SpawnSources` (drawn as green rings), scaling HP
+`×(1 + 0.15·(N−1))`; the wave clears when nothing's left to spawn and no enemies remain. Towers cost
+`kTowerCost`; you start with `kStartingGold` and none placed. HUD is a fixed left side-panel, with
+*Start Wave* / *Restart Game* controls and a per-tower cooldown readout.
+
+Extras folded in while making it playable: WASD camera pan + mouse-wheel zoom (the world<->pixel
+split — sim in world units, renderer scales by `zoom`); projectiles fly to a target's `LastSeen`
+point so a shot lands instead of vanishing when its target dies; tower `FireCooldown` clamped at 0
+(no negative drift) and reset on entering Build.
+
+The three planned additions below all shipped; details kept for reference.
 
 Three additions, all greenfield on the existing `World` / `GameState`.
 

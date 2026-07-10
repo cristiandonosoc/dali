@@ -9,8 +9,8 @@ namespace kdk {
 // https://www.redblobgames.com/grids/hexagons/#coordinates
 
 struct Hex {
-    int Q;
-    int R;
+    i32 Q;
+    i32 R;
 
     // sqrt(3), precomputed (see the TODO that used to live in WorldToHex).
     static constexpr float kSqrt3 = 1.7320508075688772f;

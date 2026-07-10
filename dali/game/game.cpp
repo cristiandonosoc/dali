@@ -39,6 +39,31 @@ constexpr float kZoomMax = 3.0f;
 
 namespace game_private {
 
+// Spiral (ring-major) layout of a radius-3 hex grid, generated once. slot 0 is the center; each ring
+// follows in order (ring k = 6k contiguous slots from 3k(k-1)+1). The two tables are inverses:
+// kSlotToHex drives InitRing's fill order; kHexToSlot drives the O(1) reverse lookup.
+constexpr Hex kSlotToHex[Grid::kTileCount] = {
+    { 0,  0},
+    {-1,  1}, { 0,  1}, { 1,  0}, { 1, -1}, { 0, -1}, {-1,  0},
+    {-2,  2}, {-1,  2}, { 0,  2}, { 1,  1}, { 2,  0}, { 2, -1},
+    { 2, -2}, { 1, -2}, { 0, -2}, {-1, -1}, {-2,  0}, {-2,  1},
+    {-3,  3}, {-2,  3}, {-1,  3}, { 0,  3}, { 1,  2}, { 2,  1},
+    { 3,  0}, { 3, -1}, { 3, -2}, { 3, -3}, { 2, -3}, { 1, -3},
+    { 0, -3}, {-1, -2}, {-2, -1}, {-3,  0}, {-3,  1}, {-3,  2},
+};
+
+// Reverse of kSlotToHex, indexed by the axial bounding box b = (q + 3) * 7 + (r + 3), b in [0, 49).
+// The 12 box cells outside the ring hold NONE. Rows are q = -3..+3, columns r = -3..+3.
+constexpr i32 kHexToSlot[Grid::kWidth * Grid::kWidth] = {
+    NONE, NONE, NONE,   34,   35,   36,   19,  // q = -3
+    NONE, NONE,   33,   17,   18,    7,   20,  // q = -2
+    NONE,   32,   16,    6,    1,    8,   21,  // q = -1
+      31,   15,    5,    0,    2,    9,   22,  // q =  0
+      30,   14,    4,    3,   10,   23, NONE,  // q =  1
+      29,   13,   12,   11,   24, NONE, NONE,  // q =  2
+      28,   27,   26,   25, NONE, NONE, NONE,  // q =  3
+};
+
 // Draws a short arrow from |from_center| toward |toward_center| (a neighbouring tile center),
 // scaled to |size|. Used to visualize each path tile's PathDirection.
 void DrawArrow(ImDrawList* draw_list,
@@ -151,6 +176,14 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
 
         draw_list->AddConvexPolyFilled(corners, 6, fill.Bits);
         draw_list->AddPolyline(corners, 6, Color32::White.Bits, ImDrawFlags_Closed, 2.0f);
+
+
+        i32 index = Grid::HexToIndex(tile.Hex);
+        char coord[64];
+        snprintf(coord, sizeof(coord), "(%d,%d)\n#%d", tile.Hex.Q, tile.Hex.R, index);
+        draw_list->AddText(ImVec2(center.x + -12.0f * zoom, center.y - 8.0f * zoom),
+                           Color32::White.Bits,
+                           coord);
     }
 
     // Flow-field arrows: each path tile points toward the neighbour that steps one hex closer to
@@ -237,30 +270,37 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
 
 }  // namespace game_private
 
-void Grid::InitRing(int radius) {
-    Tiles.Size = 0;
-    for (int q = -radius; q <= radius; ++q) {
-        int r_lo = Max(-radius, -q - radius);
-        int r_hi = Min(radius, -q + radius);
-        for (int r = r_lo; r <= r_hi; ++r) {
-            Tiles.Push(Tile{
-                .Hex = Hex{q, r}
-            });
-        }
+void Grid::InitRing() {
+    Tiles.Clear();
+    for (i32 slot = 0; slot < kTileCount; ++slot) {
+        Tiles.Push(Tile{.Hex = game_private::kSlotToHex[slot]});
     }
+}
+
+i32 Grid::HexToIndex(Hex hex) {
+    if (AbsI(hex.Q) > kRadius) {
+        return NONE;
+    }
+    if (AbsI(hex.R) > kRadius) {
+        return NONE;
+    }
+    i32 box = (hex.Q + kRadius) * kWidth + (hex.R + kRadius);
+    return game_private::kHexToSlot[box];
 }
 
 Tile* Grid::FindTile(Hex hex) {
-    for (Tile& tile : Tiles) {
-        if (tile.Hex == hex) {
-            return &tile;
-        }
+    i32 index = HexToIndex(hex);
+    if (index == NONE) {
+        return nullptr;
     }
-    return nullptr;
+    if (index >= Tiles.Size) {
+        return nullptr;
+    }
+    return &Tiles[index];
 }
 
 void World::InitLevel() {
-    Grid.InitRing(3);
+    Grid.InitRing();
     BuildStraightPath(Hex{-3, 0}, 0, 6);
     for (const Hex& hex : Path) {
         if (Tile* tile = Grid.FindTile(hex)) {

@@ -32,12 +32,19 @@ struct Tile {
 };
 
 struct Grid {
-    // Cap holds a radius-3 neighbourhood (3*r*(r+1)+1 = 37 tiles) with headroom.
-    FixedVector<Tile, 64> Tiles;
+    static constexpr i32 kRadius = 3;
+    static constexpr i32 kWidth = 2 * kRadius + 1;  // Axial bounding-box side (7); box coords [0,7).
+    static constexpr i32 kTileCount = 3 * kRadius * (kRadius + 1) + 1;  // 37 at radius 3.
 
-    // Fills the grid with every hex within |radius| of the origin. radius 0 = 1 tile, radius 1 = a
-    // center ringed by 6 (7 total), etc.
-    void InitRing(int radius);
+    // Tiles are stored in spiral (ring-major) order: slot 0 is the center, then ring k occupies 6k
+    // contiguous slots starting at 3k(k-1)+1. HexToIndex is the inverse, so a lookup is O(1).
+    FixedVector<Tile, kTileCount> Tiles;
+
+    // Fills the grid with every hex within kRadius of the origin, in spiral order (see Tiles).
+    void InitRing();
+    // Spiral slot of |hex| (its index in Tiles), or NONE if |hex| lies outside the grid. Pure coord
+    // math via a generated table — no scan.
+    static i32 HexToIndex(Hex hex);
     Tile* FindTile(Hex hex);
 };
 
