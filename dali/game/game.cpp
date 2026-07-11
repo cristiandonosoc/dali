@@ -682,6 +682,10 @@ void GameInit(PlatformState* ps, GameState* gs) {
     }
     gs->World.CollectSpawnSources();  // so the outskirts are visible before the first path edit
 
+    // Load all baked assets once. GL is already live (OnSOLoaded ran first), and the registry lives
+    // in the PermanentArena, so this does not repeat on reload.
+    gs->Registry.CrawlAndLoad();
+
     printf("[game] GameInit\n");
 }
 
@@ -745,6 +749,17 @@ StringView ToString(EOperationMode mode) {
         case EOperationMode::ToggleSpawner: return "Toggle Spawner"sv;
         case EOperationMode::ToggleTower: return "Toggle Tower"sv;
         case EOperationMode::AddChunk: return "Add Chunk"sv;
+    }
+    // clang-format on
+    ASSERT(false);
+    return "<unknown>"sv;
+}
+
+StringView ToString(EAppMode mode) {
+    // clang-format off
+    switch (mode) {
+        case EAppMode::Game:   return "Game"sv;
+        case EAppMode::Assets: return "Assets"sv;
     }
     // clang-format on
     ASSERT(false);
@@ -890,6 +905,36 @@ void TryBuyTower(World* world, Hex hex) {
     MakeTower(tile);
 }
 
+// Draws the top menu bar and lets the user switch app modes. Returns the bar's height so the views
+// below can dock beneath it instead of under it.
+float DrawMainMenuBar(GameState* gs) {
+    float height = 0.0f;
+    if (ImGui::BeginMainMenuBar()) {
+        height = ImGui::GetWindowSize().y;
+        for (EAppMode mode : kAppModes) {
+            bool is_selected = gs->AppMode == mode;
+            if (ImGui::MenuItem(ToString(mode).Str(), nullptr, is_selected)) {
+                gs->AppMode = mode;
+            }
+        }
+        ImGui::EndMainMenuBar();
+    }
+    return height;
+}
+
+// The Assets view: the asset importer/inspector. The window shell lives here; the contents are the
+// AssetEditor.
+void DrawAssetsMode(GameState* gs, float menu_bar_height) {
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(0.0f, menu_bar_height));
+    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, io.DisplaySize.y - menu_bar_height));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
+    ImGui::Begin("Assets", nullptr, flags);
+    gs->AssetEditor.Draw(&gs->Registry);
+    ImGui::End();
+}
+
 }  // namespace game_private
 
 void GameRender(PlatformState* ps, GameState* gs) {
@@ -897,6 +942,12 @@ void GameRender(PlatformState* ps, GameState* gs) {
     (void)ps;
 
     World& world = gs->World;
+
+    float menu_bar_height = DrawMainMenuBar(gs);
+    if (gs->AppMode == EAppMode::Assets) {
+        DrawAssetsMode(gs, menu_bar_height);
+        return;
+    }
 
     std::optional<Hex> clicked_hex = DrawHexGrid(ps, &world, gs->Camera, gs->Zoom);
     if (clicked_hex.has_value()) {
@@ -918,8 +969,8 @@ void GameRender(PlatformState* ps, GameState* gs) {
 
     // Dock the control panel to the full-height left edge as a fixed side window.
     ImGuiIO& io = ImGui::GetIO();
-    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2(kSidePanelWidth, io.DisplaySize.y));
+    ImGui::SetNextWindowPos(ImVec2(0.0f, menu_bar_height));
+    ImGui::SetNextWindowSize(ImVec2(kSidePanelWidth, io.DisplaySize.y - menu_bar_height));
     ImGuiWindowFlags panel_flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                                    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
     ImGui::Begin("Dali", nullptr, panel_flags);

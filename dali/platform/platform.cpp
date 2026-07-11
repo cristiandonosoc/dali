@@ -1,3 +1,4 @@
+#include <SDL3/SDL_video.h>
 #include <dali/platform/platform.h>
 
 #include <dali/core/filesystem.h>
@@ -10,6 +11,8 @@
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl3.h>
+
+#include <nfd.hpp>
 
 namespace kdk {
 
@@ -24,6 +27,61 @@ struct WindowPlatformData {
 
 void Log(ELogSeverity severity, StringView message) {
     SDL_Log("[%s] %s", ToString(severity).Str(), message.Str());
+}
+
+bool OpenFileDialog(Arena* arena, StringView* out_path, std::span<const FileDialogFilter> filters) {
+    // Map the neutral filters to NFD's item type on the stack (16 is plenty for a dialog).
+    nfdfilteritem_t items[16] = {};
+    u32 count = 0;
+    for (const FileDialogFilter& filter : filters) {
+        if (count >= 16) {
+            break;
+        }
+        items[count].name = filter.Name;
+        items[count].spec = filter.Extensions;
+        count++;
+    }
+
+    NFD::UniquePath nfd_path;
+    nfdresult_t result = NFD::OpenDialog(nfd_path, items, count);
+    if (result != NFD_OKAY) {
+        if (result == NFD_ERROR) {
+            SDL_Log("ERROR: file dialog: %s", NFD::GetError());
+        }
+        return false;  // NFD_CANCEL lands here too, silently.
+    }
+
+    *out_path = InternStringToArena(arena, nfd_path.get());
+    return true;
+}
+
+void OpenContainingFolder(StringView path) {
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+
+    // If |path| is a file, target its containing directory. If it doesn't exist (a mistyped source,
+    // say), fall back to the dirname too; a live directory is used as-is.
+    StringView target = path;
+    SDL_PathInfo info = {};
+    bool is_dir = SDL_GetPathInfo(path.Str(), &info);
+    is_dir &= (info.type == SDL_PATHTYPE_DIRECTORY);
+    if (!is_dir) {
+        target = paths::GetDirname(arena, path);
+    }
+
+    // The file manager wants a file:// URL with forward slashes (SDL_OpenURL yields '\' paths on
+    // Windows otherwise).
+    char* buffer = (char*)arena->Push(target.Size + 1).data();
+    for (u64 i = 0; i < target.Size; ++i) {
+        char c = target[i];
+        buffer[i] = (c == '\\') ? '/' : c;
+    }
+    buffer[target.Size] = '\0';
+
+    StringView url = Printf(arena, "file:///%s", buffer);
+    if (!SDL_OpenURL(url.Str())) {
+        SDL_Log("ERROR: opening folder '%s': %s", url.Str(), SDL_GetError());
+    }
 }
 
 bool InitWindow(PlatformState* ps, StringView window_name, int window_width, int window_height) {
@@ -144,6 +202,9 @@ bool PlatformInit(PlatformState* ps, const PlatformInitConfig& config) {
     using namespace platform_private;
 
     ps->API.Log = Log;
+    ps->API.GLGetProcAddress = (decltype(ps->API.GLGetProcAddress))SDL_GL_GetProcAddress;
+    ps->API.OpenFileDialog = OpenFileDialog;
+    ps->API.OpenContainingFolder = OpenContainingFolder;
 
     auto scratch = Arena::GetScratch();
     ps->BasePath = paths::GetBaseDir(scratch);
@@ -162,12 +223,19 @@ bool PlatformInit(PlatformState* ps, const PlatformInitConfig& config) {
         return false;
     }
 
+    // Native file dialogs (asset importing). Non-fatal if it fails: OpenFileDialog just returns
+    // false and the user can still type paths by hand.
+    if (NFD::Init() != NFD_OKAY) {
+        SDL_Log("WARNING: NFD init failed: %s", NFD::GetError());
+    }
+
     return true;
 }
 
 void PlatformShutdown(PlatformState* ps) {
     using namespace platform_private;
 
+    NFD::Quit();
     ShutdownImGui(ps);
     ShutdownWindow(ps);
 

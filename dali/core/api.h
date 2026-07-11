@@ -36,6 +36,13 @@ struct FileContents {
     bool IsValid() const { return Data.data() != nullptr; }
 };
 
+// One file-type filter for a native file dialog, e.g. {"Images", "png,jpg,jpeg"}. Extensions are
+// comma-separated, no dots.
+struct FileDialogFilter {
+    const char* Name = nullptr;
+    const char* Extensions = nullptr;
+};
+
 // Services the platform provides to the game. Plain function pointers (not virtuals): the struct is
 // a POD filled in by the platform, so it crosses the DLL boundary with no vtable coupling and a
 // reload never invalidates it.
@@ -50,6 +57,17 @@ struct PlatformAPI {
     // Resolves a GL entry point (wraps SDL_GL_GetProcAddress). The game's GL loader calls this from
     // OnSOLoaded to rebuild its function table after a reload.
     void* (*GLGetProcAddress)(const char* name) = nullptr;
+
+    // Opens a native, modal "open file" dialog. On success returns true and writes the chosen
+    // absolute path into |out_path| (interned into |arena|); returns false on cancel or error.
+    // |filters| are the file-type filters offered (empty for "any file").
+    bool (*OpenFileDialog)(Arena* arena,
+                           StringView* out_path,
+                           std::span<const FileDialogFilter> filters) = nullptr;
+
+    // Opens |path| in the OS file manager. If |path| is a file, opens its containing directory
+    // instead. |path| should be absolute. No-op on failure.
+    void (*OpenContainingFolder)(StringView path) = nullptr;
 };
 
 // Host-owned memory. Lives in the platform exe, so it survives DLL reloads untouched.

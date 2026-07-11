@@ -16,4 +16,4 @@ if not exist "%TEMP_DIR%" mkdir "%TEMP_DIR%"
 copy /y "bazel-bin\dali\game\game.dll" "%TEMP_DIR%\game.dll" >nul || exit /b 1
 
 echo === Running ===
-"bazel-bin\dali\platform\main.exe" --so "%TEMP_DIR%\game.dll"
+raddbg --auto_run --quit_after_success -- "bazel-bin\dali\platform\main.exe" --so "%TEMP_DIR%\game.dll"

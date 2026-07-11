@@ -27,6 +27,7 @@ cc_library(
     deps = [
         "//dali/core",
         "//third_party:glad",
+        "//third_party:nfd",
         "//third_party:sdl3",
         "//third_party:imgui_sdl3_opengl3",
     ],

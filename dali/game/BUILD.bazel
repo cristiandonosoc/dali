@@ -5,14 +5,26 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 cc_library(
     name = "lib",
     srcs = [
+        "assets/asset.cpp",
+        "assets/asset_editor.cpp",
+        "assets/registry.cpp",
+        "assets/texture_asset.cpp",
         "game.cpp",
+        "graphics/gl.cpp",
+        "graphics/texture.cpp",
         "hex.cpp",
         "log.cpp",
         "platform_state.cpp",
         "scene.cpp",
     ],
     hdrs = [
+        "assets/asset.h",
+        "assets/asset_editor.h",
+        "assets/registry.h",
+        "assets/texture_asset.h",
         "game.h",
+        "graphics/gl.h",
+        "graphics/texture.h",
         "hex.h",
         "log.h",
         "platform_state.h",
@@ -21,7 +33,9 @@ cc_library(
     visibility = ["//dali:__subpackages__"],
     deps = [
         "//dali/core",
+        "//third_party:glad",
         "//third_party:imgui",
+        "//third_party:stb",
         "//third_party:yaml-cpp",
     ],
 )

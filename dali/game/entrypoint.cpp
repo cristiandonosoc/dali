@@ -1,6 +1,7 @@
 #include <dali/game/game.h>
 
 #include <dali/core/api.h>
+#include <dali/game/graphics/gl.h>
 #include <dali/game/platform_state.h>
 
 #include <imgui.h>
@@ -48,6 +49,14 @@ KDK_API bool OnSOLoaded(kdk::PlatformState* ps, bool is_reload) {
 
     ImGui::SetCurrentContext((ImGuiContext*)ps->ImGuiState.Context);
     ImGui::SetAllocatorFunctions(ps->ImGuiState.AllocFunc, ps->ImGuiState.FreeFunc);
+
+    // The DLL image gets a fresh, empty GLAD table on every load; repopulate it against the
+    // platform's already-current context. Must happen before any GL call in the game (texture
+    // uploads, etc.).
+    if (!LoadGLBackend(ps)) {
+        printf("[entrypoint] ERROR: failed to load GL backend\n");
+        return false;
+    }
 
     printf("[entrypoint] OnSOLoaded\n");
     return true;

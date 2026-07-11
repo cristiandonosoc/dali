@@ -2,6 +2,7 @@
 
 #include <dali/core/container.h>
 #include <dali/core/string.h>
+#include <dali/game/assets/asset_editor.h>
 #include <dali/game/hex.h>
 
 #include <optional>
@@ -195,6 +196,22 @@ constexpr EOperationMode kOperationModes[] = {
     EOperationMode::AddChunk,
 };
 
+// Which top-level view the app is showing. The top menu bar switches between them: Game is the
+// playable/editor view (grid, towers, waves); Assets is the authoring view for inspecting art
+// (spritesheets, etc.). Modes are independent — the sim keeps its state while Assets is on top.
+enum class EAppMode : u8 {
+    Game,
+    Assets,
+};
+StringView ToString(EAppMode mode);
+
+// Every EAppMode value, in menu order. Keep in sync with the enum (and ToString) — this is what the
+// top menu bar iterates.
+constexpr EAppMode kAppModes[] = {
+    EAppMode::Game,
+    EAppMode::Assets,
+};
+
 // Top-level game flow: PreGame -> Build <-> Wave -> GameOver. PreGame is the setup/editor phase;
 // Build and Wave alternate (place towers, then fight a wave); GameOver ends the run.
 enum class EGamePhase : u8 {
@@ -206,6 +223,7 @@ enum class EGamePhase : u8 {
 StringView ToString(EGamePhase phase);
 
 struct GameState {
+    EAppMode AppMode = EAppMode::Game;
     EGamePhase Phase = EGamePhase::PreGame;
     EOperationMode CurrentOperation = EOperationMode::TogglePath;
 
@@ -219,6 +237,11 @@ struct GameState {
 
     World World = {};
     int InternalDetectedReload = 0;
+
+    // Assets view: the loaded asset set and the editor's transient UI state. The registry is a
+    // self-contained value blob living here in the PermanentArena, so it survives DLL reloads.
+    AssetRegistry Registry = {};
+    AssetEditor AssetEditor = {};
 };
 
 // Game entry points, called from the DLL's entrypoint.cpp. The entrypoint owns the platform<->DLL
