@@ -32,28 +32,54 @@ struct Tile {
 };
 
 struct TileChunk {
-    static constexpr i32 kRadius = 3;
-    static constexpr i32 kWidth = 2 * kRadius + 1;  // Axial bounding-box side (7); box coords [0,7).
-    static constexpr i32 kTileCount = 3 * kRadius * (kRadius + 1) + 1;  // 37 at radius 3.
+    static constexpr i32 kRadius = 2;
+    static constexpr i32 kWidth =
+        2 * kRadius + 1;  // Axial bounding-box side; box coords [0, kWidth).
+    static constexpr i32 kTileCount =
+        3 * kRadius * (kRadius + 1) + 1;  // 3r(r+1)+1 hexes in the ring.
 
+    // The absolute hex this chunk is centered on. Tiles store absolute hexes (Offset + relative),
+    // so consumers never deal in chunk-local coordinates; Offset is subtracted only to index into
+    // Tiles.
+    Hex Offset = {};
     // Tiles are stored in spiral (ring-major) order: slot 0 is the center, then ring k occupies 6k
     // contiguous slots starting at 3k(k-1)+1. HexToIndex is the inverse, so a lookup is O(1).
     FixedVector<Tile, kTileCount> Tiles;
 
-    // Fills the grid with every hex within kRadius of the origin, in spiral order (see Tiles).
-    void InitRing();
-    // Spiral slot of |hex| (its index in Tiles), or NONE if |hex| lies outside the grid. Pure coord
-    // math via a generated table — no scan.
+    // Fills the chunk centered at |offset| with every hex within kRadius, in spiral order (see
+    // Tiles). Each tile's Hex is stored absolute (offset + spiral hex).
+    void InitRing(Hex offset);
+    // Spiral slot of a chunk-RELATIVE hex (its index in Tiles), or NONE if it lies outside the
+    // ring. Pure coord math via a generated table — no scan.
     static i32 HexToIndex(const Hex& hex);
+    // Looks up an ABSOLUTE hex in this chunk (subtracts Offset first). nullptr if not in this
+    // chunk.
     Tile* FindTile(const Hex& hex);
+    // Offset from one chunk's center to its neighbour in super-direction |dir| (0..5):
+    // (kRadius+1)*Direction(dir) + kRadius*Direction(dir+1). Chunk centers form a hex lattice of
+    // index kTileCount, so radius-kRadius chunks tile the plane with no gaps and no overlap. (Pure
+    // hex axes don't tile — the clusters interlock on a sheared lattice.)
+    static Hex NeighbourChunkOffset(int dir);
 };
 
 struct Grid {
-	Hex Offset = {};
-	TileChunk TileChunk = {};
+    static constexpr i32 kMaxChunks = 8;
 
-	void Init();
-	Tile* FindTile(const Hex& hex);
+    // The grid is a set of tile chunks. They must not overlap — each absolute hex belongs to at
+    // most one chunk — so FindTile's first-hit lookup is unambiguous.
+    FixedVector<TileChunk, kMaxChunks> Chunks = {};
+
+    // Resets the grid to a single chunk centered at the origin.
+    void Init();
+    // Appends a chunk centered at |center| (absolute hex) and fills it. nullptr if Chunks is full.
+    TileChunk* AddChunk(Hex center);
+    // Finds an absolute hex across all chunks. TODO(perf): linear chunk scan — replace with an
+    // absolute-hex -> chunk index map (or coarse super-hex hash) once chunk count grows.
+    Tile* FindTile(const Hex& hex);
+
+    // Visits every tile in every chunk. Template so it stays a header inline; the sim/render tile
+    // loops route through this instead of reaching into one chunk.
+    void ForEachTile(const Function<void(Tile*)>& fn);
 };
 
 struct Enemy {
@@ -73,24 +99,24 @@ struct Enemy {
 // visually instead of popping out of existence.
 struct Projectile {
     Vec2 Position = {};  // World space, same frame as Enemy::Position.
-    Vec2 LastSeen = {};  // Target's position as of the last frame it was alive; the shot flies here.
-    u32 TargetId = 0;      // The enemy this shot is chasing.
+    Vec2 LastSeen =
+        {};            // Target's position as of the last frame it was alive; the shot flies here.
+    u32 TargetId = 0;  // The enemy this shot is chasing.
     float Speed = 320.0f;  // Pixels per second.
     float Damage = 5.0f;
 };
 
 // One wave of enemies: a finite burst emitted from the map's spawn sources during the Wave phase.
 struct Wave {
-    int Number = 0;    // 1-based once armed; 0 means no wave has run yet.
-    int ToSpawn = 0;   // Enemies left to emit this wave; the wave ends when this hits 0 and none
-                       // remain alive.
+    int Number = 0;   // 1-based once armed; 0 means no wave has run yet.
+    int ToSpawn = 0;  // Enemies left to emit this wave; the wave ends when this hits 0 and none
+                      // remain alive.
     float SpawnTimer = 0.0f;  // Counts up to Cadence, then emits one enemy and wraps.
     float Cadence = 0.6f;     // Seconds between emissions.
     int SpawnCursor = 0;      // Round-robins emissions across SpawnSources when there are several.
 };
 
 struct World {
-    static constexpr i32 kMaxPathTiles = 16;
     static constexpr i32 kMaxEnemies = 128;
     static constexpr i32 kMaxProjectiles = 256;
     static constexpr i32 kMaxSpawnSources = 8;
@@ -101,7 +127,6 @@ struct World {
     // Player currency. Grows by an enemy's Reward each time a tower kills one.
     int Gold = 0;
     Grid Grid = {};
-    FixedVector<Hex, kMaxPathTiles> Path = {};
     // The tile every path drains into. All PathDirections point one hex closer to it.
     std::optional<Hex> Goal = {};
 
@@ -114,10 +139,6 @@ struct World {
     // field by CollectSpawnSources. These are the map's outskirts.
     FixedVector<Hex, kMaxSpawnSources> SpawnSources = {};
 
-    // Sets up the M01 level: a radius-3 grid with a hardcoded straight diameter path (spawn at one
-    // edge, through the center, base at the opposite edge).
-    void InitLevel();
-    void BuildStraightPath(Hex start, int dir, int steps);
     // Flood-fills PathDirection on every path tile so each steps toward the neighbour one hex
     // closer to Goal (BFS from Goal over IsPath tiles). Tiles with no route to Goal are left at
     // NONE.
@@ -160,6 +181,7 @@ enum class EOperationMode : u8 {
     SetPathGoal,
     ToggleSpawner,
     ToggleTower,
+    AddChunk,
 };
 StringView ToString(EOperationMode mode);
 
@@ -170,6 +192,7 @@ constexpr EOperationMode kOperationModes[] = {
     EOperationMode::SetPathGoal,
     EOperationMode::ToggleSpawner,
     EOperationMode::ToggleTower,
+    EOperationMode::AddChunk,
 };
 
 // Top-level game flow: PreGame -> Build <-> Wave -> GameOver. PreGame is the setup/editor phase;
@@ -188,7 +211,7 @@ struct GameState {
 
     // Screen-space camera pan (WASD). Added to the world's draw origin, so it offsets both what is
     // rendered and where clicks land.
-	bool InverseCameraMovement = false;
+    bool InverseCameraMovement = false;
     Vec2 Camera = {};
     // World->screen scale (mouse wheel). The sim stays in world units; only rendering and picking
     // scale by this.

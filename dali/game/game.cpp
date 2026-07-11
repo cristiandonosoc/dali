@@ -39,60 +39,58 @@ constexpr float kZoomMax = 3.0f;
 
 namespace game_private {
 
-// Spiral (ring-major) layout of a radius-3 hex grid, generated once. slot 0 is the center; each
-// ring follows in order (ring k = 6k contiguous slots from 3k(k-1)+1). The two tables are inverses:
-// kSlotToHex drives InitRing's fill order; kHexToSlot drives the O(1) reverse lookup.
-constexpr Hex kSlotToHex[TileChunk::kTileCount] = {
-    { 0,  0},
-    {-1,  1},
-    { 0,  1},
-    { 1,  0},
-    { 1, -1},
+// The six axial neighbour directions, flat-top, matching Hex::Direction. Kept local and constexpr
+// so the spiral tables below can be generated at compile time (Hex's own methods are not
+// constexpr).
+constexpr Hex kHexDirections[6] = {
+    {+1,  0},
+    {+1, -1},
     { 0, -1},
     {-1,  0},
-    {-2,  2},
-    {-1,  2},
-    { 0,  2},
-    { 1,  1},
-    { 2,  0},
-    { 2, -1},
-    { 2, -2},
-    { 1, -2},
-    { 0, -2},
-    {-1, -1},
-    {-2,  0},
-    {-2,  1},
-    {-3,  3},
-    {-2,  3},
-    {-1,  3},
-    { 0,  3},
-    { 1,  2},
-    { 2,  1},
-    { 3,  0},
-    { 3, -1},
-    { 3, -2},
-    { 3, -3},
-    { 2, -3},
-    { 1, -3},
-    { 0, -3},
-    {-1, -2},
-    {-2, -1},
-    {-3,  0},
-    {-3,  1},
-    {-3,  2},
+    {-1, +1},
+    { 0, +1},
 };
 
-// Reverse of kSlotToHex, indexed by the axial bounding box b = (q + 3) * 7 + (r + 3), b in [0, 49).
-// The 12 box cells outside the ring hold NONE. Rows are q = -3..+3, columns r = -3..+3.
-constexpr i32 kHexToSlot[TileChunk::kWidth * TileChunk::kWidth] = {
-    NONE, NONE, NONE, 34, 35,   36,   19,    // q = -3
-    NONE, NONE, 33,   17, 18,   7,    20,    // q = -2
-    NONE, 32,   16,   6,  1,    8,    21,    // q = -1
-    31,   15,   5,    0,  2,    9,    22,    // q =  0
-    30,   14,   4,    3,  10,   23,   NONE,  // q =  1
-    29,   13,   12,   11, 24,   NONE, NONE,  // q =  2
-    28,   27,   26,   25, NONE, NONE, NONE,  // q =  3
-};
+// The spiral (ring-major) slot->hex layout, generated from TileChunk::kRadius: slot 0 is the
+// center, then ring k (1..kRadius) contributes 6k hexes, walked from the (-k,+k) corner around the
+// 6 directions. Change kRadius and the tables follow — no hand-maintained data.
+consteval Array<Hex, TileChunk::kTileCount> MakeSlotToHex() {
+    Array<Hex, TileChunk::kTileCount> table = {};
+    i32 slot = 0;
+    table[slot] = Hex{0, 0};
+    slot++;
+    for (i32 k = 1; k <= TileChunk::kRadius; ++k) {
+        Hex hex = {-k, k};
+        for (i32 i = 0; i < 6; ++i) {
+            for (i32 j = 0; j < k; ++j) {
+                table[slot] = hex;
+                slot++;
+                hex = Hex{hex.Q + kHexDirections[i].Q, hex.R + kHexDirections[i].R};
+            }
+        }
+    }
+    return table;
+}
+
+// Inverse of MakeSlotToHex, indexed by the axial bounding box b = (q + kRadius) * kWidth + (r +
+// kRadius). Box cells outside the ring stay NONE. Together the pair gives O(1) hex<->slot both
+// ways.
+consteval Array<i32, TileChunk::kWidth * TileChunk::kWidth> MakeHexToSlot() {
+    Array<Hex, TileChunk::kTileCount> slot_to_hex = MakeSlotToHex();
+    Array<i32, TileChunk::kWidth * TileChunk::kWidth> table = {};
+    for (i32 box = 0; box < TileChunk::kWidth * TileChunk::kWidth; ++box) {
+        table[box] = NONE;
+    }
+    for (i32 slot = 0; slot < TileChunk::kTileCount; ++slot) {
+        Hex hex = slot_to_hex[slot];
+        i32 box = (hex.Q + TileChunk::kRadius) * TileChunk::kWidth + (hex.R + TileChunk::kRadius);
+        table[box] = slot;
+    }
+    return table;
+}
+
+constexpr Array<Hex, TileChunk::kTileCount> kSlotToHex = MakeSlotToHex();
+constexpr Array<i32, TileChunk::kWidth * TileChunk::kWidth> kHexToSlot = MakeHexToSlot();
 
 // Draws a short arrow from |from_center| toward |toward_center| (a neighbouring tile center),
 // scaled to |size|. Used to visualize each path tile's PathDirection.
@@ -171,6 +169,14 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
     Vec2 mouse_world((io.MousePos.x - origin.x) / zoom, (io.MousePos.y - origin.y) / zoom);
     Hex hovered = Hex::WorldToHex(kHexSize, mouse_world);
 
+    // A left click selects the hovered hex — even empty space with no tile, so ops like AddChunk
+    // can target a void. Clicks ImGui is consuming (over the docked panel) are ignored.
+    if (!io.WantCaptureMouse) {
+        if (ps->Input.IsMousePressed(EMouseButton::Left)) {
+            result = hovered;
+        }
+    }
+
     ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
 
     // A tile-center in screen space. Shared by the grid pass and the path spine so they line up.
@@ -178,64 +184,67 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
         return world_to_screen(Hex::HexToWorld(kHexSize, hex));
     };
 
-    for (const Tile& tile : world->Grid.TileChunk.Tiles) {
-        ImVec2 center = tile_center(tile.Hex);
+    for (i32 chunk_index = 0; chunk_index < world->Grid.Chunks.Size; ++chunk_index) {
+        const TileChunk& chunk = world->Grid.Chunks[chunk_index];
+        for (i32 slot = 0; slot < chunk.Tiles.Size; ++slot) {
+            const Tile& tile = chunk.Tiles[slot];
+            ImVec2 center = tile_center(tile.Hex);
 
-        ImVec2 corners[6];
-        for (int i = 0; i < 6; ++i) {
-            Vec2 c = Hex::HexCorner(kHexSize * zoom, Vec2(center.x, center.y), i);
-            corners[i] = ImVec2(c.x, c.y);
-        }
-
-        // Hover wins over the path color, which wins over the plain grid color.
-        Color32 fill = Color32::DarkSlateGrey;
-        if (tile.IsPath) {
-            fill = Color32::Sienna;
-        }
-        if (tile.Hex == hovered) {
-            // Ignore clicks ImGui is consuming (e.g. over the docked panel), so the grid behind it
-            // isn't clicked through.
-            if (!io.WantCaptureMouse) {
-                if (ps->Input.IsMousePressed(EMouseButton::Left)) {
-                    result = tile.Hex;
-                }
+            ImVec2 corners[6];
+            for (int i = 0; i < 6; ++i) {
+                Vec2 c = Hex::HexCorner(kHexSize * zoom, Vec2(center.x, center.y), i);
+                corners[i] = ImVec2(c.x, c.y);
             }
 
-            fill = Color32::Gold;
+            // Hover wins over the path color, which wins over the plain grid color.
+            Color32 fill = Color32::DarkSlateGrey;
+            if (tile.IsPath) {
+                fill = Color32::Sienna;
+            }
+            if (tile.Hex == hovered) {
+                fill = Color32::Gold;
+            }
+
+            draw_list->AddConvexPolyFilled(corners, 6, fill.Bits);
+            draw_list->AddPolyline(corners, 6, Color32::White.Bits, ImDrawFlags_Closed, 2.0f);
+
+            // // Debug label: absolute hex, then chunk:slot (slots repeat per chunk, so both are
+            // // shown).
+            // char coord[64];
+            // snprintf(coord,
+            //          sizeof(coord),
+            //          "(%d,%d)\n%d:%d",
+            //          tile.Hex.Q,
+            //          tile.Hex.R,
+            //          chunk_index,
+            //          slot);
+            // draw_list->AddText(ImVec2(center.x + -12.0f * zoom, center.y - 8.0f * zoom),
+            //                    Color32::White.Bits,
+            //                    coord);
         }
-
-        draw_list->AddConvexPolyFilled(corners, 6, fill.Bits);
-        draw_list->AddPolyline(corners, 6, Color32::White.Bits, ImDrawFlags_Closed, 2.0f);
-
-        i32 index = TileChunk::HexToIndex(tile.Hex);
-        char coord[64];
-        snprintf(coord, sizeof(coord), "(%d,%d)\n#%d", tile.Hex.Q, tile.Hex.R, index);
-        draw_list->AddText(ImVec2(center.x + -12.0f * zoom, center.y - 8.0f * zoom),
-                           Color32::White.Bits,
-                           coord);
     }
 
     // Flow-field arrows: each path tile points toward the neighbour that steps one hex closer to
     // the goal (its PathDirection). Tiles with no route to the goal keep NONE and draw nothing.
-    for (const Tile& tile : world->Grid.TileChunk.Tiles) {
-        if (!tile.IsPath || tile.PathDirection == NONE) {
-            continue;
+    world->Grid.ForEachTile([&](Tile* tile) {
+        if (!tile->IsPath || tile->PathDirection == NONE) {
+            return;
         }
-        ImVec2 center = tile_center(tile.Hex);
-        ImVec2 toward = tile_center(tile.Hex.Neighbour(tile.PathDirection));
+        ImVec2 center = tile_center(tile->Hex);
+        ImVec2 toward = tile_center(tile->Hex.Neighbour(tile->PathDirection));
         DrawArrow(draw_list, center, toward, kHexSize * zoom, Color32::BrightGold);
-    }
+    });
 
     // Buildings: a tile holds at most one. Spawners (enemy origins) are green discs; towers are
     // blue discs ringed by a faint circle showing their firing range.
-    for (const Tile& tile : world->Grid.TileChunk.Tiles) {
-        ImVec2 center = tile_center(tile.Hex);
-        if (tile.Content == ETileContent::Spawner) {
+    world->Grid.ForEachTile([&](Tile* tile) {
+        ImVec2 center = tile_center(tile->Hex);
+        if (tile->Content == ETileContent::Spawner) {
             draw_list->AddCircleFilled(center, 10.0f * zoom, Color32::Green.Bits);
             draw_list->AddCircle(center, 10.0f * zoom, Color32::White.Bits, 0, 2.0f);
-        } else if (tile.Content == ETileContent::Tower) {
+        } else if (tile->Content == ETileContent::Tower) {
             // The range ring only shows while hovering this tower, so a dense field stays readable.
-            if (tile.Hex == hovered) {
+            if (tile->Hex == hovered) {
                 draw_list->AddCircle(center, kTowerRange * zoom, Color32::Cyan.Bits, 0, 2.0f);
             }
             draw_list->AddCircleFilled(center, 10.0f * zoom, Color32::SteelBlue.Bits);
@@ -244,12 +253,12 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
             // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
             // visible at a glance.
             char cooldown_label[16];
-            snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tile.FireCooldown);
+            snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tile->FireCooldown);
             draw_list->AddText(ImVec2(center.x + 12.0f * zoom, center.y - 8.0f * zoom),
                                Color32::White.Bits,
                                cooldown_label);
         }
-    }
+    });
 
     // Spawn sources: the outskirt tiles waves emit from (derived path leaves). A green ring marks
     // each so you can see where enemies will enter.
@@ -299,10 +308,12 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
 
 }  // namespace game_private
 
-void TileChunk::InitRing() {
+void TileChunk::InitRing(Hex offset) {
+    Offset = offset;
     Tiles.Clear();
     for (i32 slot = 0; slot < kTileCount; ++slot) {
-        Tiles.Push(Tile{.Hex = game_private::kSlotToHex[slot]});
+        Hex relative = game_private::kSlotToHex[slot];
+        Tiles.Push(Tile{.Hex = offset.Add(relative)});
     }
 }
 
@@ -318,7 +329,8 @@ i32 TileChunk::HexToIndex(const Hex& hex) {
 }
 
 Tile* TileChunk::FindTile(const Hex& hex) {
-    i32 index = HexToIndex(hex);
+    Hex relative = hex.Substract(Offset);
+    i32 index = HexToIndex(relative);
     if (index == NONE) {
         return nullptr;
     }
@@ -328,36 +340,50 @@ Tile* TileChunk::FindTile(const Hex& hex) {
     return &Tiles[index];
 }
 
-void Grid::Init() { TileChunk.InitRing(); }
-
-Tile* Grid::FindTile(const Hex& hex) { return TileChunk.FindTile(hex); }
-
-void World::InitLevel() {
-    Grid.Init();
-    BuildStraightPath(Hex{-3, 0}, 0, 6);
-    for (const Hex& hex : Path) {
-        if (Tile* tile = Grid.FindTile(hex)) {
-            tile->IsPath = true;
-        }
-    }
-    Goal = Path.Last();
-    CalculatePath();
+Hex TileChunk::NeighbourChunkOffset(int dir) {
+    Hex a = Hex::Direction(dir);
+    Hex b = Hex::Direction((dir + 1) % 6);
+    return Hex{(kRadius + 1) * a.Q + kRadius * b.Q, (kRadius + 1) * a.R + kRadius * b.R};
 }
 
-void World::BuildStraightPath(Hex start, int dir, int steps) {
-    Path.Clear();
-    Hex hex = start;
-    Path.Push(hex);
-    for (int i = 0; i < steps; ++i) {
-        hex = hex.Neighbour(dir);
-        Path.Push(hex);
+void Grid::Init() {
+    Chunks.Clear();
+    AddChunk(Hex{0, 0});
+}
+
+TileChunk* Grid::AddChunk(Hex center) {
+    if (Chunks.IsFull()) {
+        return nullptr;
+    }
+    TileChunk& chunk = Chunks.Push(TileChunk{});
+    chunk.InitRing(center);
+    return &chunk;
+}
+
+Tile* Grid::FindTile(const Hex& hex) {
+    // TODO(perf): linear scan over chunks. Replace with an absolute-hex -> chunk index map once the
+    // chunk count grows. The distance guard keeps each miss to a cheap subtract, no table probe.
+    for (TileChunk& chunk : Chunks) {
+        if (Hex::Distance(hex, chunk.Offset) > TileChunk::kRadius) {
+            continue;
+        }
+        if (Tile* tile = chunk.FindTile(hex)) {
+            return tile;
+        }
+    }
+    return nullptr;
+}
+
+void Grid::ForEachTile(const Function<void(Tile*)>& fn) {
+    for (TileChunk& chunk : Chunks) {
+        for (Tile& tile : chunk.Tiles) {
+            fn(&tile);
+        }
     }
 }
 
 void World::CalculatePath() {
-    for (Tile& tile : Grid.TileChunk.Tiles) {
-        tile.PathDirection = NONE;
-    }
+    Grid.ForEachTile([](Tile* tile) { tile->PathDirection = NONE; });
 
     if (!Goal.has_value()) {
         return;
@@ -370,7 +396,7 @@ void World::CalculatePath() {
     // BFS outward from the goal over connected path tiles. Each tile records the direction that
     // steps toward the tile it was reached from — i.e. one hex closer to the goal. A real direction
     // (0..5) doubles as the "visited" mark; the goal stays NONE (you are already home).
-    FixedVector<Hex, decltype(Grid.TileChunk.Tiles)::kMaxSize> frontier;
+    FixedVector<Hex, TileChunk::kTileCount * Grid::kMaxChunks> frontier;
     frontier.Push(*Goal);
     for (i32 head = 0; head < frontier.Size; ++head) {
         Hex current = frontier[head];
@@ -433,9 +459,7 @@ void World::BeginRun() {
     Projectiles.Clear();
 
     // Start with no towers; PreGame only lays out terrain (path + goal).
-    for (Tile& tile : Grid.TileChunk.Tiles) {
-        tile.Content = ETileContent::None;
-    }
+    Grid.ForEachTile([](Tile* tile) { tile->Content = ETileContent::None; });
 
     CalculatePath();
     CollectSpawnSources();
@@ -443,18 +467,18 @@ void World::BeginRun() {
 
 void World::CollectSpawnSources() {
     SpawnSources.Clear();
-    for (Tile& tile : Grid.TileChunk.Tiles) {
-        if (!tile.IsPath) {
-            continue;
+    Grid.ForEachTile([&](Tile* tile) {
+        if (!tile->IsPath) {
+            return;
         }
-        if (tile.PathDirection == NONE) {
-            continue;  // no route to the goal, so nothing spawns here
+        if (tile->PathDirection == NONE) {
+            return;  // no route to the goal, so nothing spawns here
         }
 
         // A source is a path tile that no neighbouring path tile flows into.
         bool has_incoming = false;
         for (int dir = 0; dir < 6; ++dir) {
-            Tile* neighbour = Grid.FindTile(tile.Hex.Neighbour(dir));
+            Tile* neighbour = Grid.FindTile(tile->Hex.Neighbour(dir));
             if (!neighbour) {
                 continue;
             }
@@ -465,20 +489,20 @@ void World::CollectSpawnSources() {
                 continue;
             }
             Hex flows_to = neighbour->Hex.Neighbour(neighbour->PathDirection);
-            if (flows_to == tile.Hex) {
+            if (flows_to == tile->Hex) {
                 has_incoming = true;
                 break;
             }
         }
 
         if (has_incoming) {
-            continue;
+            return;
         }
         if (SpawnSources.IsFull()) {
-            continue;
+            return;
         }
-        SpawnSources.Push(tile.Hex);
-    }
+        SpawnSources.Push(tile->Hex);
+    });
 }
 
 void World::ArmNextWave() {
@@ -488,12 +512,12 @@ void World::ArmNextWave() {
 }
 
 void World::ResetTowerCooldowns() {
-    for (Tile& tile : Grid.TileChunk.Tiles) {
-        if (tile.Content != ETileContent::Tower) {
-            continue;
+    Grid.ForEachTile([](Tile* tile) {
+        if (tile->Content != ETileContent::Tower) {
+            return;
         }
-        tile.FireCooldown = 0.0f;
-    }
+        tile->FireCooldown = 0.0f;
+    });
 }
 
 void World::UpdateWave(float dt) {
@@ -569,22 +593,22 @@ void World::UpdateTowers(float dt) {
         goal_pos = Hex::HexToWorld(kHexSize, *Goal);
     }
 
-    for (Tile& tile : Grid.TileChunk.Tiles) {
-        if (tile.Content != ETileContent::Tower) {
-            continue;
+    Grid.ForEachTile([&](Tile* tile) {
+        if (tile->Content != ETileContent::Tower) {
+            return;
         }
 
-        tile.FireCooldown -= dt;
-        if (tile.FireCooldown > 0.0f) {
-            continue;  // still cooling down
+        tile->FireCooldown -= dt;
+        if (tile->FireCooldown > 0.0f) {
+            return;  // still cooling down
         }
         // Ready to fire. Clamp to 0 so a tower with no target in range holds at "ready" instead of
         // drifting ever more negative while it waits.
-        tile.FireCooldown = 0.0f;
+        tile->FireCooldown = 0.0f;
 
         // Among enemies in range, pick the one closest to the base. Compare squared distances to
         // skip the sqrt.
-        Vec2 tower_pos = Hex::HexToWorld(kHexSize, tile.Hex);
+        Vec2 tower_pos = Hex::HexToWorld(kHexSize, tile->Hex);
         constexpr float kRangeSq = kTowerRange * kTowerRange;
         Enemy* target = nullptr;
         float best_priority = 0.0f;  // lower wins; meaning depends on goal_pos
@@ -601,7 +625,7 @@ void World::UpdateTowers(float dt) {
         }
 
         if (!target || Projectiles.IsFull()) {
-            continue;  // nothing in range (or no room) — hold fire, retry next frame
+            return;  // nothing in range (or no room) — hold fire, retry next frame
         }
 
         Projectile projectile = {};
@@ -611,8 +635,8 @@ void World::UpdateTowers(float dt) {
         projectile.TargetId = target->Id;
         projectile.Damage = kTowerDamage;
         Projectiles.Push(projectile);
-        tile.FireCooldown = kTowerFireInterval;
-    }
+        tile->FireCooldown = kTowerFireInterval;
+    });
 }
 
 void World::UpdateProjectiles(float dt) {
@@ -651,9 +675,10 @@ constexpr StringView kScenePath = "extras/scene.yaml"sv;
 void GameInit(PlatformState* ps, GameState* gs) {
     (void)ps;
 
-    // Reload the last saved scene; fall back to the hardcoded default the first time (no file yet).
+    // Reload the last saved scene; fall back to an empty grid the first time (no file yet). The
+    // player lays out the path/goal in the PreGame editor.
     if (!LoadScene(&gs->World, kScenePath)) {
-        gs->World.InitLevel();
+        gs->World.Grid.Init();
     }
     gs->World.CollectSpawnSources();  // so the outskirts are visible before the first path edit
 
@@ -719,6 +744,7 @@ StringView ToString(EOperationMode mode) {
         case EOperationMode::SetPathGoal: return "Set Path Goal"sv;
         case EOperationMode::ToggleSpawner: return "Toggle Spawner"sv;
         case EOperationMode::ToggleTower: return "Toggle Tower"sv;
+        case EOperationMode::AddChunk: return "Add Chunk"sv;
     }
     // clang-format on
     ASSERT(false);
@@ -740,9 +766,61 @@ StringView ToString(EGamePhase phase) {
 
 namespace game_private {
 
+// Adds a new chunk adjacent to the existing grid, in the direction of |clicked|. Chunk centers sit
+// on the super-hex lattice (see TileChunk::NeighbourChunkOffset) so the clusters tile gaplessly and
+// never overlap: it snaps to the neighbour slot of the nearest chunk that best faces the click.
+// No-op if that slot is already filled (or the grid is empty/full).
+void TryAddChunkToward(World* world, Hex clicked) {
+    Grid& grid = world->Grid;
+    if (grid.Chunks.IsEmpty()) {
+        return;
+    }
+    if (grid.Chunks.IsFull()) {
+        return;
+    }
+
+    // The chunk nearest the click is the one we expand from.
+    TileChunk* nearest = &grid.Chunks[0];
+    i32 best = Hex::Distance(clicked, nearest->Offset);
+    for (TileChunk& chunk : grid.Chunks) {
+        i32 d = Hex::Distance(clicked, chunk.Offset);
+        if (d < best) {
+            best = d;
+            nearest = &chunk;
+        }
+    }
+
+    // Of the 6 neighbouring chunk slots, pick the one facing the click.
+    Hex target = nearest->Offset.Add(TileChunk::NeighbourChunkOffset(0));
+    i32 target_dist = Hex::Distance(target, clicked);
+    for (int dir = 1; dir < 6; ++dir) {
+        Hex candidate = nearest->Offset.Add(TileChunk::NeighbourChunkOffset(dir));
+        i32 d = Hex::Distance(candidate, clicked);
+        if (d < target_dist) {
+            target_dist = d;
+            target = candidate;
+        }
+    }
+
+    // Don't stack a chunk onto one that already exists there.
+    for (TileChunk& chunk : grid.Chunks) {
+        if (chunk.Offset == target) {
+            return;
+        }
+    }
+
+    grid.AddChunk(target);
+}
+
 // PreGame terrain editor: applies the current operation to the clicked tile. This is the M01
 // editor, now scoped to the setup phase.
 void ApplyEditorOp(GameState* gs, Hex hex) {
+    // AddChunk targets empty space (a hex with no tile yet), so it runs before the tile lookup.
+    if (gs->CurrentOperation == EOperationMode::AddChunk) {
+        TryAddChunkToward(&gs->World, hex);
+        return;
+    }
+
     Tile* tile = gs->World.Grid.FindTile(hex);
     if (!tile) {
         return;
@@ -786,6 +864,9 @@ void ApplyEditorOp(GameState* gs, Hex hex) {
                 MakeTower(tile);
             }
             break;
+        }
+        case EOperationMode::AddChunk: {
+            break;  // handled before the tile lookup above
         }
     }
 }
@@ -924,6 +1005,10 @@ void GameRender(PlatformState* ps, GameState* gs) {
             if (!world.SpawnSources.IsEmpty()) {
                 world.SpawnEnemy(world.SpawnSources[0]);
             }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("+100 Gold")) {
+            world.Gold += 100;
         }
     }
 

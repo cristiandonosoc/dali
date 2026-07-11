@@ -29,13 +29,3 @@ TEST_CASE("Each hex direction yields a distance-1 neighbour", "[hex]") {
         REQUIRE(Hex::Distance(origin, origin.Neighbour(dir)) == 1);
     }
 }
-
-TEST_CASE("A straight path is a chain of contiguous neighbours", "[hex]") {
-    World world = {};
-    world.BuildStraightPath(Hex{-3, 0}, 0, 6);
-
-    REQUIRE(world.Path.Size == 7);  // start tile + 6 steps
-    for (i32 i = 1; i < world.Path.Size; ++i) {
-        REQUIRE(Hex::Distance(world.Path[i - 1], world.Path[i]) == 1);
-    }
-}

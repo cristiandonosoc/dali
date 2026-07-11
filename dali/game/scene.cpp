@@ -18,16 +18,18 @@ bool SaveScene(const World& world, StringView path) {
     }
 
     out << YAML::Key << "tiles" << YAML::Value << YAML::BeginSeq;
-    for (const Tile& tile : world.Grid.TileChunk.Tiles) {
-        if (!tile.IsPath && tile.Content == ETileContent::None) {
-            continue;
+    for (const TileChunk& chunk : world.Grid.Chunks) {
+        for (const Tile& tile : chunk.Tiles) {
+            if (!tile.IsPath && tile.Content == ETileContent::None) {
+                continue;
+            }
+            out << YAML::Flow << YAML::BeginMap;
+            out << YAML::Key << "q" << YAML::Value << tile.Hex.Q;
+            out << YAML::Key << "r" << YAML::Value << tile.Hex.R;
+            out << YAML::Key << "path" << YAML::Value << (tile.IsPath ? 1 : 0);
+            out << YAML::Key << "content" << YAML::Value << (int)tile.Content;
+            out << YAML::EndMap;
         }
-        out << YAML::Flow << YAML::BeginMap;
-        out << YAML::Key << "q" << YAML::Value << tile.Hex.Q;
-        out << YAML::Key << "r" << YAML::Value << tile.Hex.R;
-        out << YAML::Key << "path" << YAML::Value << (tile.IsPath ? 1 : 0);
-        out << YAML::Key << "content" << YAML::Value << (int)tile.Content;
-        out << YAML::EndMap;
     }
     out << YAML::EndSeq;
     out << YAML::EndMap;

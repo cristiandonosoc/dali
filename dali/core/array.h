@@ -20,20 +20,22 @@ struct Array {
 
     T _Data[N];
 
-    T* DataPtr() { return _Data; }
-    const T* DataPtr() const { return _Data; }
+    constexpr T* DataPtr() { return _Data; }
+    constexpr const T* DataPtr() const { return _Data; }
 
-    T& operator[](i32 index);
-    const T& operator[](i32 index) const;
+    // constexpr so a whole table can be built at consteval time (the ASSERT below is a compile error
+    // if it trips there); at runtime it still bounds-checks. See MakeSlotToHex in game.cpp.
+    constexpr T& operator[](i32 index);
+    constexpr const T& operator[](i32 index) const;
 
-    T& First() { return _Data[0]; }
-    const T& First() const { return _Data[0]; }
+    constexpr T& First() { return _Data[0]; }
+    constexpr const T& First() const { return _Data[0]; }
 
-    T& Last() { return _Data[Size - 1]; }
-    const T& Last() const { return _Data[Size - 1]; }
+    constexpr T& Last() { return _Data[Size - 1]; }
+    constexpr const T& Last() const { return _Data[Size - 1]; }
 
-    T& At(i32 index) { return _Data[index]; }
-    const T& At(i32 index) const { return _Data[index]; }
+    constexpr T& At(i32 index) { return _Data[index]; }
+    constexpr const T& At(i32 index) const { return _Data[index]; }
 
     std::span<T> ToSpan() { return {_Data, (u32)Size}; }
     std::span<const T> ToSpan() const { return {_Data, (u32)Size}; }
@@ -64,12 +66,12 @@ struct Array {
     }
 
     // Iterator support
-    T* begin() { return _Data; }
-    T* end() { return _Data + Size; }
-    const T* begin() const { return _Data; }
-    const T* end() const { return _Data + Size; }
-    const T* cbegin() const { return _Data; }
-    const T* cend() const { return _Data + Size; }
+    constexpr T* begin() { return _Data; }
+    constexpr T* end() { return _Data + Size; }
+    constexpr const T* begin() const { return _Data; }
+    constexpr const T* end() const { return _Data + Size; }
+    constexpr const T* cbegin() const { return _Data; }
+    constexpr const T* cend() const { return _Data + Size; }
 };
 static_assert(sizeof(Array<int, 4>) == sizeof(Array<int, 4>::_Data));
 // static_assert(offsetof(Array<int, 4>, _Data) == 0);
@@ -84,13 +86,13 @@ Array(T, U...) -> Array<T, 1 + sizeof...(U)>;
 // IMPLEMENTATION ----------------------------------------------------------------------------------
 
 template <typename T, i32 N>
-T& Array<T, N>::operator[](i32 index) {
+constexpr T& Array<T, N>::operator[](i32 index) {
     ASSERT(index < Size);
     return _Data[index];
 }
 
 template <typename T, i32 N>
-const T& Array<T, N>::operator[](i32 index) const {
+constexpr const T& Array<T, N>::operator[](i32 index) const {
     ASSERT(index < Size);
     return _Data[index];
 }
