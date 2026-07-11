@@ -22,6 +22,13 @@ StringView ForwardSlashes(Arena* arena, StringView s) {
     return StringView(buffer, s.Size);
 }
 
+// Copies |s| into a fixed char buffer of |cap| bytes, truncating and null-terminating.
+void CopyToBuffer(StringView s, char* dst, u64 cap) {
+    u64 count = s.Size < cap - 1 ? s.Size : cap - 1;
+    std::memcpy(dst, s.Str(), count);
+    dst[count] = '\0';
+}
+
 // A forward-slashed, lowercased copy for case- and separator-insensitive path comparison: Windows
 // paths are case-insensitive and the dialog yields '\', while GetBaseDir may differ in both.
 StringView PathCompareKey(Arena* arena, StringView s) {
@@ -73,11 +80,11 @@ StringView ToWorkingDirRelative(Arena* arena, StringView path) {
 }
 
 // Opens the native file dialog for an image and writes the chosen (working-dir-relative) path into
-// |dst| (a fixed char buffer of |cap| bytes).
-void BrowseForSource(char* dst, u64 cap) {
+// |dst| (a fixed char buffer of |cap| bytes). Returns true if a file was chosen.
+bool BrowseForSource(char* dst, u64 cap) {
     PlatformState* ps = GetGlobalPlatformState();
     if (!ps || !ps->API.OpenFileDialog) {
-        return;
+        return false;
     }
 
     auto scratch = Arena::GetScratch();
@@ -87,13 +94,39 @@ void BrowseForSource(char* dst, u64 cap) {
         {"Images", "png,jpg,jpeg,bmp,tga"},
     };
     if (!ps->API.OpenFileDialog(arena, &chosen, filters)) {
-        return;
+        return false;
     }
 
-    StringView rel = ToWorkingDirRelative(arena, chosen);
-    u64 count = rel.Size < cap - 1 ? rel.Size : cap - 1;
-    std::memcpy(dst, rel.Str(), count);
-    dst[count] = '\0';
+    CopyToBuffer(ToWorkingDirRelative(arena, chosen), dst, cap);
+    return true;
+}
+
+// Suggests an asset id from a raw source path: drops the extension, strips the "raw/" source root,
+// and replaces the first (category) directory with the asset type's id root. e.g.
+// "raw/sprites/goblin/U_Walk.png" -> "textures/goblin/U_Walk". Case is preserved; the id is
+// canonicalized (lowercased) at create time by AssetId::Normalize.
+void SuggestTextureId(StringView source, char* dst, u64 cap) {
+    if (source.IsEmpty()) {
+        return;
+    }
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+
+    StringView path = ForwardSlashes(arena, source);
+    path = paths::RemoveExtension(arena, path);
+    path = RemovePrefix(arena, path, "raw/"sv);  // raw is the source root, never part of an id
+
+    // Drop the first (category) directory; the id's first directory is the asset type's root.
+    StringView rest = path;
+    for (u64 i = 0; i < path.Size; ++i) {
+        if (path[i] == '/') {
+            rest = StringView(path.Str() + i + 1, path.Size - i - 1);
+            break;
+        }
+    }
+
+    StringView suggested = Printf(arena, "%s/%s", TextureAsset::kIdRoot.Str(), rest.Str());
+    CopyToBuffer(suggested, dst, cap);
 }
 
 // Opens the folder containing |source| (a working-dir-relative path) in the OS file manager.
@@ -180,7 +213,9 @@ void AssetEditor::Draw(AssetRegistry* registry) {
     ImGui::InputText("Source (raw)", NewSource, sizeof(NewSource));
     ImGui::SameLine();
     if (ImGui::Button("Browse...")) {
-        BrowseForSource(NewSource, sizeof(NewSource));
+        if (BrowseForSource(NewSource, sizeof(NewSource))) {
+            SuggestTextureId(StringView(NewSource), NewId, sizeof(NewId));
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("Open Dir")) {

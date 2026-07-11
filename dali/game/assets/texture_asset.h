@@ -17,6 +17,10 @@ struct TextureImportSettings {
 struct TextureAsset {
     static constexpr EAssetType kAssetType = EAssetType::Texture;
     static constexpr i32 kVersion = 1;
+    // The root directory of a texture asset's id ("textures/goblin/walk"). The importer uses it to
+    // suggest an id from a raw source path (the id's first directory is the asset type, not the
+    // source's).
+    static constexpr StringView kIdRoot = "textures"sv;
 
     AssetManifest Manifest = {};
     TextureImportSettings Settings = {};
