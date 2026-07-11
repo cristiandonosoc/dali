@@ -31,7 +31,7 @@ struct Tile {
     float FireCooldown = 0.0f;
 };
 
-struct Grid {
+struct TileChunk {
     static constexpr i32 kRadius = 3;
     static constexpr i32 kWidth = 2 * kRadius + 1;  // Axial bounding-box side (7); box coords [0,7).
     static constexpr i32 kTileCount = 3 * kRadius * (kRadius + 1) + 1;  // 37 at radius 3.
@@ -44,8 +44,16 @@ struct Grid {
     void InitRing();
     // Spiral slot of |hex| (its index in Tiles), or NONE if |hex| lies outside the grid. Pure coord
     // math via a generated table — no scan.
-    static i32 HexToIndex(Hex hex);
-    Tile* FindTile(Hex hex);
+    static i32 HexToIndex(const Hex& hex);
+    Tile* FindTile(const Hex& hex);
+};
+
+struct Grid {
+	Hex Offset = {};
+	TileChunk TileChunk = {};
+
+	void Init();
+	Tile* FindTile(const Hex& hex);
 };
 
 struct Enemy {

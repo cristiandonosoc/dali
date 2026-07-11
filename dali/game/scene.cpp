@@ -18,7 +18,7 @@ bool SaveScene(const World& world, StringView path) {
     }
 
     out << YAML::Key << "tiles" << YAML::Value << YAML::BeginSeq;
-    for (const Tile& tile : world.Grid.Tiles) {
+    for (const Tile& tile : world.Grid.TileChunk.Tiles) {
         if (!tile.IsPath && tile.Content == ETileContent::None) {
             continue;
         }
@@ -46,16 +46,16 @@ bool LoadScene(World* world, StringView path) {
         return false;  // no scene on disk yet
     }
 
-    world->Grid.InitRing();
+    world->Grid.Init();
     world->Goal = {};
     world->Enemies.Clear();
     world->Projectiles.Clear();
     world->BaseHealth = World::kMaxBaseHealth;
     world->Gold = 0;
 
-    // We build without exceptions, so use the non-throwing as<T>(fallback) accessors — as<T>() throws
-    // on a missing/mistyped field. The file is our own throwaway output, so anything unexpected just
-    // resolves to defaults rather than a crash.
+    // We build without exceptions, so use the non-throwing as<T>(fallback) accessors — as<T>()
+    // throws on a missing/mistyped field. The file is our own throwaway output, so anything
+    // unexpected just resolves to defaults rather than a crash.
     YAML::Node root = YAML::Load(file);
 
     if (root["goal"] && root["goal"].size() == 2) {
