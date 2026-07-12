@@ -92,9 +92,27 @@ consteval Array<i32, TileChunk::kWidth * TileChunk::kWidth> MakeHexToSlot() {
 constexpr Array<Hex, TileChunk::kTileCount> kSlotToHex = MakeSlotToHex();
 constexpr Array<i32, TileChunk::kWidth * TileChunk::kWidth> kHexToSlot = MakeHexToSlot();
 
+struct DrawContext {
+    ImDrawList* DrawList;
+    Vec2 Origin;
+    float Zoom = 1;
+
+    DrawContext(ImDrawList* draw_list, const Vec2& origin, float zoom)
+        : DrawList(draw_list), Origin(origin), Zoom(zoom) {}
+
+    ImVec2 WorldToScreen(const Vec2& p) const {
+        return ImVec2(Origin.x + p.x * Zoom, Origin.y + p.y * Zoom);
+    }
+
+    // A tile-center in screen space. Shared by the grid pass and the path spine so they line up.
+    ImVec2 TileCenter(const Hex& hex) const {
+        return WorldToScreen(Hex::HexToWorld(kHexSize, hex));
+    }
+};
+
 // Draws a short arrow from |from_center| toward |toward_center| (a neighbouring tile center),
 // scaled to |size|. Used to visualize each path tile's PathDirection.
-void DrawArrow(ImDrawList* draw_list,
+void DrawArrow(DrawContext* dc,
                ImVec2 from_center,
                ImVec2 toward_center,
                float size,
@@ -108,7 +126,7 @@ void DrawArrow(ImDrawList* draw_list,
     float shaft = size * 0.42f;
     ImVec2 tail(from_center.x - dir.x * shaft * 0.35f, from_center.y - dir.y * shaft * 0.35f);
     ImVec2 tip(from_center.x + dir.x * shaft, from_center.y + dir.y * shaft);
-    draw_list->AddLine(tail, tip, color.Bits, 3.0f);
+    dc->DrawList->AddLine(tail, tip, color.Bits, 3.0f);
 
     // Two barbs: |dir| reversed, then rotated +/- 28 degrees and scaled down.
     constexpr float kHead = 10.0f;
@@ -116,19 +134,19 @@ void DrawArrow(ImDrawList* draw_list,
     Vec2 back(-dir.x, -dir.y);
     Vec2 left(back.x * Cos(a) - back.y * Sin(a), back.x * Sin(a) + back.y * Cos(a));
     Vec2 right(back.x * Cos(-a) - back.y * Sin(-a), back.x * Sin(-a) + back.y * Cos(-a));
-    draw_list->AddLine(tip,
-                       ImVec2(tip.x + left.x * kHead, tip.y + left.y * kHead),
-                       color.Bits,
-                       3.0f);
-    draw_list->AddLine(tip,
-                       ImVec2(tip.x + right.x * kHead, tip.y + right.y * kHead),
-                       color.Bits,
-                       3.0f);
+    dc->DrawList->AddLine(tip,
+                          ImVec2(tip.x + left.x * kHead, tip.y + left.y * kHead),
+                          color.Bits,
+                          3.0f);
+    dc->DrawList->AddLine(tip,
+                          ImVec2(tip.x + right.x * kHead, tip.y + right.y * kHead),
+                          color.Bits,
+                          3.0f);
 }
 
 // Draws a horizontal health bar (black backdrop + colored fill) centered at |center_x| with its top
 // at |top_y|. |fraction| is clamped to [0,1]; an empty bar still shows the backdrop.
-void DrawHealthBar(ImDrawList* draw_list,
+void DrawHealthBar(DrawContext* dc,
                    float center_x,
                    float top_y,
                    float width,
@@ -139,9 +157,48 @@ void DrawHealthBar(ImDrawList* draw_list,
     ImVec2 bar_min(center_x - width * 0.5f, top_y);
     ImVec2 bar_max(bar_min.x + width, bar_min.y + kHeight);
     ImVec2 fill_max(bar_min.x + width * f, bar_max.y);
-    draw_list->AddRectFilled(bar_min, bar_max, Color32::Black.Bits);
-    draw_list->AddRectFilled(bar_min, fill_max, fill.Bits);
-    draw_list->AddRect(bar_min, bar_max, Color32::Black.Bits);
+    dc->DrawList->AddRectFilled(bar_min, bar_max, Color32::Black.Bits);
+    dc->DrawList->AddRectFilled(bar_min, fill_max, fill.Bits);
+    dc->DrawList->AddRect(bar_min, bar_max, Color32::Black.Bits);
+}
+
+void DrawEnemy(DrawContext* dc, const Enemy& enemy) {
+    ImVec2 p = dc->WorldToScreen(enemy.Position);
+    dc->DrawList->AddCircleFilled(p, 6.0f * dc->Zoom, enemy.Data.Color.Bits);
+    dc->DrawList->AddCircle(p, 6.0f * dc->Zoom, Color32::Black.Bits, 0, 1.5f);
+
+    // Health bar, only once the enemy has taken damage (a full bar would just be clutter).
+    if (enemy.Data.MaxHealth > 0.0f && enemy.Health < enemy.Data.MaxHealth) {
+        DrawHealthBar(dc,
+                      p.x,
+                      p.y - 12.0f * dc->Zoom,
+                      18.0f * dc->Zoom,
+                      enemy.Health / enemy.Data.MaxHealth,
+                      Color32::Green);
+    }
+}
+
+void DrawTileContent(DrawContext* dc, const Tile& tile, const Hex& hovered) {
+    ImVec2 center = dc->TileCenter(tile.Hex);
+    if (tile.Content == ETileContent::Spawner) {
+        dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::Green.Bits);
+        dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
+    } else if (tile.Content == ETileContent::Tower) {
+        // The range ring only shows while hovering this tower, so a dense field stays readable.
+        if (tile.Hex == hovered) {
+            dc->DrawList->AddCircle(center, kTowerRange * dc->Zoom, Color32::Cyan.Bits, 0, 2.0f);
+        }
+        dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::SteelBlue.Bits);
+        dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
+
+        // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
+        // visible at a glance.
+        char cooldown_label[16];
+        snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tile.FireCooldown);
+        dc->DrawList->AddText(ImVec2(center.x + 12.0f * dc->Zoom, center.y - 8.0f * dc->Zoom),
+                              Color32::White.Bits,
+                              cooldown_label);
+    }
 }
 
 // Debug-draws the grid straight onto ImGui's background draw list. Per milestone-01 step 3 there is
@@ -159,10 +216,13 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
     Vec2 origin(kSidePanelWidth + (io.DisplaySize.x - kSidePanelWidth) * 0.5f + camera.x,
                 io.DisplaySize.y * 0.5f + camera.y);
 
-    // World->screen: the sim is in zoom-independent world units; pixels are origin + world * zoom.
-    auto world_to_screen = [&](Vec2 w) -> ImVec2 {
-        return ImVec2(origin.x + w.x * zoom, origin.y + w.y * zoom);
-    };
+    ImDrawList* _draw_list = ImGui::GetBackgroundDrawList();
+    DrawContext dc(_draw_list, origin, zoom);
+
+    // // World->screen: the sim is in zoom-independent world units; pixels are origin + world *
+    // zoom. auto world_to_screen = [&](Vec2 w) -> ImVec2 {
+    //     return ImVec2(origin.x + w.x * zoom, origin.y + w.y * zoom);
+    // };
 
     // Which hex is under the mouse? Invert the exact transform (undo zoom, then origin) so the
     // highlight lines up regardless of the screen's Y-down convention.
@@ -177,18 +237,11 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
         }
     }
 
-    ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
-
-    // A tile-center in screen space. Shared by the grid pass and the path spine so they line up.
-    auto tile_center = [&](Hex hex) -> ImVec2 {
-        return world_to_screen(Hex::HexToWorld(kHexSize, hex));
-    };
-
     for (i32 chunk_index = 0; chunk_index < world->Grid.Chunks.Size; ++chunk_index) {
         const TileChunk& chunk = world->Grid.Chunks[chunk_index];
         for (i32 slot = 0; slot < chunk.Tiles.Size; ++slot) {
             const Tile& tile = chunk.Tiles[slot];
-            ImVec2 center = tile_center(tile.Hex);
+            ImVec2 center = dc.TileCenter(tile.Hex);
 
             ImVec2 corners[6];
             for (int i = 0; i < 6; ++i) {
@@ -205,8 +258,8 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
                 fill = Color32::Gold;
             }
 
-            draw_list->AddConvexPolyFilled(corners, 6, fill.Bits);
-            draw_list->AddPolyline(corners, 6, Color32::White.Bits, ImDrawFlags_Closed, 2.0f);
+            dc.DrawList->AddConvexPolyFilled(corners, 6, fill.Bits);
+            dc.DrawList->AddPolyline(corners, 6, Color32::White.Bits, ImDrawFlags_Closed, 2.0f);
 
             // // Debug label: absolute hex, then chunk:slot (slots repeat per chunk, so both are
             // // shown).
@@ -230,49 +283,28 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
         if (!tile->IsPath || tile->PathDirection == NONE) {
             return;
         }
-        ImVec2 center = tile_center(tile->Hex);
-        ImVec2 toward = tile_center(tile->Hex.Neighbour(tile->PathDirection));
-        DrawArrow(draw_list, center, toward, kHexSize * zoom, Color32::BrightGold);
+        ImVec2 center = dc.TileCenter(tile->Hex);
+        ImVec2 toward = dc.TileCenter(tile->Hex.Neighbour(tile->PathDirection));
+        DrawArrow(&dc, center, toward, kHexSize * zoom, Color32::BrightGold);
     });
 
     // Buildings: a tile holds at most one. Spawners (enemy origins) are green discs; towers are
     // blue discs ringed by a faint circle showing their firing range.
-    world->Grid.ForEachTile([&](Tile* tile) {
-        ImVec2 center = tile_center(tile->Hex);
-        if (tile->Content == ETileContent::Spawner) {
-            draw_list->AddCircleFilled(center, 10.0f * zoom, Color32::Green.Bits);
-            draw_list->AddCircle(center, 10.0f * zoom, Color32::White.Bits, 0, 2.0f);
-        } else if (tile->Content == ETileContent::Tower) {
-            // The range ring only shows while hovering this tower, so a dense field stays readable.
-            if (tile->Hex == hovered) {
-                draw_list->AddCircle(center, kTowerRange * zoom, Color32::Cyan.Bits, 0, 2.0f);
-            }
-            draw_list->AddCircleFilled(center, 10.0f * zoom, Color32::SteelBlue.Bits);
-            draw_list->AddCircle(center, 10.0f * zoom, Color32::White.Bits, 0, 2.0f);
-
-            // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
-            // visible at a glance.
-            char cooldown_label[16];
-            snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tile->FireCooldown);
-            draw_list->AddText(ImVec2(center.x + 12.0f * zoom, center.y - 8.0f * zoom),
-                               Color32::White.Bits,
-                               cooldown_label);
-        }
-    });
+    world->Grid.ForEachTile([&](Tile* tile) { DrawTileContent(&dc, *tile, hovered); });
 
     // Spawn sources: the outskirt tiles waves emit from (derived path leaves). A green ring marks
     // each so you can see where enemies will enter.
     for (const Hex& source : world->SpawnSources) {
-        ImVec2 center = tile_center(source);
-        draw_list->AddCircle(center, kHexSize * 0.55f * zoom, Color32::Green.Bits, 6, 3.0f);
+        ImVec2 center = dc.TileCenter(source);
+        dc.DrawList->AddCircle(center, kHexSize * 0.55f * zoom, Color32::Green.Bits, 6, 3.0f);
     }
 
     // The goal: the tile every path drains into. Its base-health bar is always shown so you can
     // watch it drop as enemies break through.
     if (world->Goal.has_value()) {
-        ImVec2 center = tile_center(*world->Goal);
-        draw_list->AddCircleFilled(center, 9.0f * zoom, Color32::Red.Bits);
-        DrawHealthBar(draw_list,
+        ImVec2 center = dc.TileCenter(*world->Goal);
+        dc.DrawList->AddCircleFilled(center, 9.0f * zoom, Color32::Red.Bits);
+        DrawHealthBar(&dc,
                       center.x,
                       center.y - 18.0f * zoom,
                       28.0f * zoom,
@@ -282,25 +314,13 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
 
     // Enemies walking the flow field from spawner toward the goal.
     for (const Enemy& enemy : world->Enemies) {
-        ImVec2 p = world_to_screen(enemy.Position);
-        draw_list->AddCircleFilled(p, 6.0f * zoom, enemy.Data.Color.Bits);
-        draw_list->AddCircle(p, 6.0f * zoom, Color32::Black.Bits, 0, 1.5f);
-
-        // Health bar, only once the enemy has taken damage (a full bar would just be clutter).
-        if (enemy.Data.MaxHealth > 0.0f && enemy.Health < enemy.Data.MaxHealth) {
-            DrawHealthBar(draw_list,
-                          p.x,
-                          p.y - 12.0f * zoom,
-                          18.0f * zoom,
-                          enemy.Health / enemy.Data.MaxHealth,
-                          Color32::Green);
-        }
+        DrawEnemy(&dc, enemy);
     }
 
     // Tower projectiles in flight toward their targets.
     for (const Projectile& projectile : world->Projectiles) {
-        ImVec2 p = world_to_screen(projectile.Position);
-        draw_list->AddCircleFilled(p, 3.0f * zoom, Color32::Yellow.Bits);
+        ImVec2 p = dc.WorldToScreen(projectile.Position);
+        dc.DrawList->AddCircleFilled(p, 3.0f * zoom, Color32::Yellow.Bits);
     }
 
     return result;
@@ -423,7 +443,7 @@ void World::SpawnEnemy(const EnemyAsset& blueprint, Hex at, float health_scale) 
     enemy.Id = NextEnemyId;
     NextEnemyId++;
     enemy.Position = Hex::HexToWorld(kHexSize, at);
-    enemy.Target = at;  // retargets to the next flow-field tile on the first update
+    enemy.Target = at;            // retargets to the next flow-field tile on the first update
     enemy.Data = blueprint.Data;  // snapshot the stats; the blueprint is not retained
     enemy.Data.MaxHealth *= health_scale;
     enemy.Health = enemy.Data.MaxHealth;
@@ -731,8 +751,9 @@ void GameUpdate(PlatformState* ps, GameState* gs) {
         return;  // PreGame / Build / GameOver freeze the sim
     }
 
-    // Resolve the wave's enemy blueprint here (the sim is registry-agnostic). Fall back to a default
-    // blueprint if the id is missing, so the game still runs before any enemy asset is authored.
+    // Resolve the wave's enemy blueprint here (the sim is registry-agnostic). Fall back to a
+    // default blueprint if the id is missing, so the game still runs before any enemy asset is
+    // authored.
     const EnemyAsset* blueprint = gs->Registry.FindEnemyBlueprint(world.DefaultEnemy);
     EnemyAsset fallback = {};
     world.UpdateWave(dt, blueprint ? *blueprint : fallback);
