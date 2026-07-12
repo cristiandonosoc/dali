@@ -20,6 +20,10 @@ struct AssetEditor {
     // Spritesheet creation form scratch (just the concept id; textures + clips are added in the
     // inspector).
     char NewSheetId[128] = "spritesheets/goblin";
+
+    // Enemy creation form scratch (a blueprint is created from just its id; stats edited in the
+    // inspector).
+    char NewEnemyId[128] = "enemies/goblin";
     // Inspector scratch: which ref to preview, and the new-clip form.
     AssetId SelectedRef = {};
     char NewClipName[64] = "";
@@ -40,6 +44,7 @@ struct AssetEditor {
     void Draw(AssetRegistry* registry);
     void DrawTextureTab(AssetRegistry* registry);
     void DrawSpritesheetTab(AssetRegistry* registry);
+    void DrawEnemyTab(AssetRegistry* registry);
 };
 
 }  // namespace kdk

@@ -283,16 +283,16 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
     // Enemies walking the flow field from spawner toward the goal.
     for (const Enemy& enemy : world->Enemies) {
         ImVec2 p = world_to_screen(enemy.Position);
-        draw_list->AddCircleFilled(p, 6.0f * zoom, Color32::OrangeRed.Bits);
+        draw_list->AddCircleFilled(p, 6.0f * zoom, enemy.Data.Color.Bits);
         draw_list->AddCircle(p, 6.0f * zoom, Color32::Black.Bits, 0, 1.5f);
 
         // Health bar, only once the enemy has taken damage (a full bar would just be clutter).
-        if (enemy.MaxHealth > 0.0f && enemy.Health < enemy.MaxHealth) {
+        if (enemy.Data.MaxHealth > 0.0f && enemy.Health < enemy.Data.MaxHealth) {
             DrawHealthBar(draw_list,
                           p.x,
                           p.y - 12.0f * zoom,
                           18.0f * zoom,
-                          enemy.Health / enemy.MaxHealth,
+                          enemy.Health / enemy.Data.MaxHealth,
                           Color32::Green);
         }
     }
@@ -415,7 +415,7 @@ void World::CalculatePath() {
     }
 }
 
-void World::SpawnEnemy(Hex at, float health_scale) {
+void World::SpawnEnemy(const EnemyAsset& blueprint, Hex at, float health_scale) {
     if (Enemies.IsFull()) {
         return;
     }
@@ -424,8 +424,10 @@ void World::SpawnEnemy(Hex at, float health_scale) {
     NextEnemyId++;
     enemy.Position = Hex::HexToWorld(kHexSize, at);
     enemy.Target = at;  // retargets to the next flow-field tile on the first update
-    enemy.Health = enemy.Health * health_scale;
-    enemy.MaxHealth = enemy.Health;
+    enemy.Data = blueprint.Data;  // snapshot the stats; the blueprint is not retained
+    enemy.Data.MaxHealth *= health_scale;
+    enemy.Health = enemy.Data.MaxHealth;
+    enemy.Blueprint = blueprint.Manifest.Id;
     Enemies.Push(enemy);
 }
 
@@ -520,7 +522,7 @@ void World::ResetTowerCooldowns() {
     });
 }
 
-void World::UpdateWave(float dt) {
+void World::UpdateWave(float dt, const EnemyAsset& blueprint) {
     if (Wave.ToSpawn <= 0) {
         return;
     }
@@ -539,7 +541,7 @@ void World::UpdateWave(float dt) {
     Hex source = SpawnSources[index];
 
     float health_scale = 1.0f + kWaveHealthScalePerWave * (float)(Wave.Number - 1);
-    SpawnEnemy(source, health_scale);
+    SpawnEnemy(blueprint, source, health_scale);
     Wave.ToSpawn--;
 }
 
@@ -550,7 +552,7 @@ void World::UpdateEnemies(float dt) {
         Enemy& enemy = Enemies[i];
 
         // Spend this frame's travel budget, walking through as many tiles as it reaches.
-        float remaining = enemy.Speed * dt;
+        float remaining = enemy.Data.Speed * dt;
         bool arrived = false;
         while (remaining > 0.0f) {
             Vec2 target_pos = Hex::HexToWorld(kHexSize, enemy.Target);
@@ -576,7 +578,7 @@ void World::UpdateEnemies(float dt) {
         }
 
         if (arrived) {
-            BaseHealth = Max(0.0f, BaseHealth - enemy.Damage);  // enemy breached the goal
+            BaseHealth = Max(0.0f, BaseHealth - enemy.Data.Damage);  // enemy breached the goal
             Enemies.RemoveUnorderedAt(i);  // swaps the last enemy into i; reprocess it
         } else {
             ++i;
@@ -656,7 +658,7 @@ void World::UpdateProjectiles(float dt) {
             if (target) {
                 target->Health -= projectile.Damage;
                 if (target->Health <= 0.0f) {
-                    Gold += target->Reward;  // bounty for the kill
+                    Gold += target->Data.Reward;  // bounty for the kill
                     Enemies.RemoveUnorderedAt((i32)(target - Enemies.begin()));
                 }
             }
@@ -685,6 +687,10 @@ void GameInit(PlatformState* ps, GameState* gs) {
     // Load all baked assets once. GL is already live (OnSOLoaded ran first), and the registry lives
     // in the PermanentArena, so this does not repeat on reload.
     gs->Registry.CrawlAndLoad();
+
+    // The blueprint waves spawn until wave-composition exists. If the asset is absent, UpdateWave
+    // falls back to a default-stat enemy, so this id being unresolved is not fatal.
+    gs->World.DefaultEnemy = AssetId::Normalize("enemies/goblin"sv);
 
     printf("[game] GameInit\n");
 }
@@ -725,7 +731,11 @@ void GameUpdate(PlatformState* ps, GameState* gs) {
         return;  // PreGame / Build / GameOver freeze the sim
     }
 
-    world.UpdateWave(dt);
+    // Resolve the wave's enemy blueprint here (the sim is registry-agnostic). Fall back to a default
+    // blueprint if the id is missing, so the game still runs before any enemy asset is authored.
+    const EnemyAsset* blueprint = gs->Registry.FindEnemyBlueprint(world.DefaultEnemy);
+    EnemyAsset fallback = {};
+    world.UpdateWave(dt, blueprint ? *blueprint : fallback);
     world.UpdateEnemies(dt);
     world.UpdateTowers(dt);
     world.UpdateProjectiles(dt);
@@ -1087,7 +1097,9 @@ void GameRender(PlatformState* ps, GameState* gs) {
         // Drop one enemy on the first spawn source, to test firing without waiting on a wave.
         if (ImGui::Button("Spawn Enemy")) {
             if (!world.SpawnSources.IsEmpty()) {
-                world.SpawnEnemy(world.SpawnSources[0]);
+                const EnemyAsset* blueprint = gs->Registry.FindEnemyBlueprint(world.DefaultEnemy);
+                EnemyAsset fallback = {};
+                world.SpawnEnemy(blueprint ? *blueprint : fallback, world.SpawnSources[0]);
             }
         }
         ImGui::SameLine();

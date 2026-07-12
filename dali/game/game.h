@@ -3,6 +3,7 @@
 #include <dali/core/container.h>
 #include <dali/core/string.h>
 #include <dali/game/assets/asset_editor.h>
+#include <dali/game/assets/enemy_asset.h>
 #include <dali/game/hex.h>
 
 #include <optional>
@@ -87,11 +88,15 @@ struct Enemy {
     u32 Id = 0;          // Stable across the enemy's life; projectiles home on this, not an index.
     Vec2 Position = {};  // World space (pre-view-origin). World unit == pixel.
     Hex Target = {};     // The tile it is walking toward; the flow field picks the next one.
-    float Speed = 100.0f;     // Pixels per second.
-    float Health = 10.0f;     // Single HP pool; a tower projectile subtracts its damage on impact.
-    float MaxHealth = 10.0f;  // Health at spawn; the health bar draws Health/MaxHealth.
-    float Damage = 5.0f;      // HP drained from the base when this enemy reaches the goal.
-    int Reward = 5;           // Gold granted to the player when a tower kills this enemy.
+    // Single HP pool; a tower projectile subtracts its damage on impact. Starts at Data.MaxHealth
+    // (post health-scale) and only decreases — that's why it lives here, not in the snapshot.
+    float Health = 0.0f;
+    // Stats snapshotted from the blueprint at spawn (speed, max health, damage, reward, color). A
+    // blueprint edit does not retroactively change enemies already walking.
+    InstanceData Data = {};
+    // Which EnemyAsset stamped this. The live link back to the blueprint (a stable id, not a
+    // pointer, so it survives a re-crawl / DLL reload); the v2 sprite lookup resolves through it.
+    AssetId Blueprint = {};
 };
 
 // A tower shot in flight. Each frame it refreshes LastSeen to the live target's position and flies
@@ -133,6 +138,10 @@ struct World {
 
     u32 NextEnemyId = 1;  // 0 is reserved as "no target"; ids are handed out monotonically.
     FixedVector<Enemy, kMaxEnemies> Enemies = {};
+    // The blueprint the wave spawns, until wave-composition (per-wave / per-spawner enemy types)
+    // exists. Set in GameInit; resolved against the registry by the caller, which passes the
+    // blueprint into UpdateWave (the sim stays registry-agnostic).
+    AssetId DefaultEnemy = {};
     FixedVector<Projectile, kMaxProjectiles> Projectiles = {};
 
     Wave Wave = {};
@@ -145,7 +154,9 @@ struct World {
     // NONE.
     void CalculatePath();
 
-    void SpawnEnemy(Hex at, float health_scale = 1.0f);
+    // Stamps a runtime enemy from |blueprint| at |at|, snapshotting its stats (health_scale
+    // multiplies MaxHealth, e.g. for later waves). The sim never looks the blueprint up itself.
+    void SpawnEnemy(const EnemyAsset& blueprint, Hex at, float health_scale = 1.0f);
     // Returns the live enemy with |id|, or nullptr if it has despawned/died. Linear scan.
     Enemy* FindEnemy(u32 id);
     // Resets per-run state (gold, base health, wave, live entities) and strips placed towers, then
@@ -159,8 +170,9 @@ struct World {
     // Sets every tower's FireCooldown to 0 (ready). Called when entering Build so each wave starts
     // with towers ready rather than mid-cooldown from the last one.
     void ResetTowerCooldowns();
-    // During the Wave phase, drips this wave's enemies from the spawn sources on the cadence.
-    void UpdateWave(float dt);
+    // During the Wave phase, drips this wave's enemies from the spawn sources on the cadence. The
+    // caller resolves |blueprint| (World::DefaultEnemy) against the registry and passes it in.
+    void UpdateWave(float dt, const EnemyAsset& blueprint);
     // Advances each enemy along the flow field; despawns those that reach the goal.
     void UpdateEnemies(float dt);
     // Ticks each tower's cooldown; a ready tower fires a projectile at the nearest enemy in range.

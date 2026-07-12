@@ -1,0 +1,9 @@
+type: enemy
+version: 1
+id: enemies/wolf
+instance:
+  speed: 82
+  max_health: 10
+  damage: 5
+  reward: 5
+  color: "46158cff"

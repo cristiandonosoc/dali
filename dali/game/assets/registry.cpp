@@ -64,6 +64,10 @@ void CrawlDir(AssetRegistry* registry, Arena* arena, StringView abs_dir, StringV
                 registry->LoadSpritesheet(id);
                 break;
             }
+            case EAssetType::Enemy: {
+                registry->LoadEnemyBlueprint(id);
+                break;
+            }
             default: {
                 LogWarning("AssetRegistry: unknown asset type in '%s'", id.Value.Str());
                 break;
@@ -84,6 +88,7 @@ void AssetRegistry::CrawlAndLoad() {
     }
     Textures.Clear();
     Spritesheets.Clear();
+    EnemyBlueprints.Clear();
 
     auto scratch = Arena::GetScratch();
     Arena* arena = scratch;
@@ -94,7 +99,10 @@ void AssetRegistry::CrawlAndLoad() {
     // second pass once everything is loaded.
     ResolveReferences();
 
-    LogInfo("AssetRegistry: loaded %d textures, %d spritesheets", Textures.Size, Spritesheets.Size);
+    LogInfo("AssetRegistry: loaded %d textures, %d spritesheets, %d enemies",
+            Textures.Size,
+            Spritesheets.Size,
+            EnemyBlueprints.Size);
 }
 
 void AssetRegistry::ResolveReferences() {
@@ -161,6 +169,35 @@ SpritesheetAsset* AssetRegistry::FindSpritesheet(AssetId id) {
     for (SpritesheetAsset& sheet : Spritesheets) {
         if (sheet.Manifest.Id == id) {
             return &sheet;
+        }
+    }
+    return nullptr;
+}
+
+EnemyAsset* AssetRegistry::LoadEnemyBlueprint(AssetId id) {
+    std::optional<EnemyAsset> loaded = EnemyAsset::LoadFromDisk(id);
+    if (!loaded) {
+        return nullptr;
+    }
+
+    if (EnemyAsset* existing = FindEnemyBlueprint(id)) {
+        *existing = *loaded;
+        return existing;
+    }
+
+    if (EnemyBlueprints.IsFull()) {
+        LogError("AssetRegistry: enemy capacity (%d) reached, dropping '%s'",
+                 kMaxEnemyBlueprints,
+                 id.Value.Str());
+        return nullptr;
+    }
+    return &EnemyBlueprints.Push(*loaded);
+}
+
+EnemyAsset* AssetRegistry::FindEnemyBlueprint(AssetId id) {
+    for (EnemyAsset& enemy : EnemyBlueprints) {
+        if (enemy.Manifest.Id == id) {
+            return &enemy;
         }
     }
     return nullptr;

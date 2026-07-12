@@ -36,6 +36,7 @@ StringView ToString(EAssetType type) {
         case EAssetType::Invalid: return "invalid"sv;
         case EAssetType::Texture: return "texture"sv;
         case EAssetType::Spritesheet: return "spritesheet"sv;
+        case EAssetType::Enemy: return "enemy"sv;
         case EAssetType::COUNT: break;
     }
     ASSERT(false);
@@ -48,6 +49,9 @@ EAssetType AssetTypeFromString(StringView str) {
     }
     if (str == "spritesheet"sv) {
         return EAssetType::Spritesheet;
+    }
+    if (str == "enemy"sv) {
+        return EAssetType::Enemy;
     }
     return EAssetType::Invalid;
 }

@@ -10,6 +10,7 @@ enum class EAssetType : u8 {
     Invalid = 0,
     Texture,
     Spritesheet,
+    Enemy,
     COUNT,
 };
 // The lowercase token used in a manifest's `type:` field ("texture").

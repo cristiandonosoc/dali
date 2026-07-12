@@ -1,6 +1,7 @@
 #pragma once
 
 #include <dali/core/container.h>
+#include <dali/game/assets/enemy_asset.h>
 #include <dali/game/assets/spritesheet_asset.h>
 #include <dali/game/assets/texture_asset.h>
 
@@ -12,9 +13,13 @@ namespace kdk {
 struct AssetRegistry {
     static constexpr i32 kMaxTextures = 256;
     static constexpr i32 kMaxSpritesheets = 256;
+    static constexpr i32 kMaxEnemyBlueprints = 256;
 
     FixedVector<TextureAsset, kMaxTextures> Textures = {};
     FixedVector<SpritesheetAsset, kMaxSpritesheets> Spritesheets = {};
+    // Enemy blueprints (CDOs). "Blueprint" in the name keeps this distinct from World::FindEnemy,
+    // which returns a live runtime instance.
+    FixedVector<EnemyAsset, kMaxEnemyBlueprints> EnemyBlueprints = {};
 
     // Destroys every loaded asset and reloads by crawling the assets/ directory, then resolves
     // cross-asset references. Call once at init; also the "Rescan" action in the editor.
@@ -27,10 +32,12 @@ struct AssetRegistry {
     // id (freeing a texture's GPU resource first). nullptr on failure.
     TextureAsset* LoadTexture(AssetId id);
     SpritesheetAsset* LoadSpritesheet(AssetId id);
+    EnemyAsset* LoadEnemyBlueprint(AssetId id);
 
     // Finds a loaded asset by id, or nullptr.
     TextureAsset* FindTexture(AssetId id);
     SpritesheetAsset* FindSpritesheet(AssetId id);
+    EnemyAsset* FindEnemyBlueprint(AssetId id);
 };
 
 }  // namespace kdk

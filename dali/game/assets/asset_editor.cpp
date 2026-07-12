@@ -429,6 +429,41 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
 
 }  // namespace asset_editor_private
 
+namespace asset_editor_private {
+
+// The enemy inspector: edits the blueprint's InstanceData in place, then Save writes the manifest.
+// No preview machinery in v1 — the color swatch is the whole visual.
+void DrawEnemyInspector(EnemyAsset* enemy) {
+    ImGui::Text("Id: %s", enemy->Manifest.Id.Value.Str());
+    ImGui::Separator();
+
+    InstanceData& data = enemy->Data;
+    ImGui::DragFloat("Speed", &data.Speed, 1.0f, 0.0f, 1000.0f);
+    ImGui::DragFloat("Max Health", &data.MaxHealth, 1.0f, 1.0f, 100000.0f);
+    ImGui::DragFloat("Damage", &data.Damage, 0.5f, 0.0f, 100000.0f);
+    ImGui::DragInt("Reward", &data.Reward, 1.0f, 0, 100000);
+
+    float rgba[4] = {
+        data.Color.R / 255.0f,
+        data.Color.G / 255.0f,
+        data.Color.B / 255.0f,
+        data.Color.A / 255.0f,
+    };
+    if (ImGui::ColorEdit4("Color", rgba)) {
+        data.Color.R = (u8)(rgba[0] * 255.0f + 0.5f);
+        data.Color.G = (u8)(rgba[1] * 255.0f + 0.5f);
+        data.Color.B = (u8)(rgba[2] * 255.0f + 0.5f);
+        data.Color.A = (u8)(rgba[3] * 255.0f + 0.5f);
+    }
+
+    ImGui::Separator();
+    if (ImGui::Button("Save")) {
+        enemy->SaveManifest();
+    }
+}
+
+}  // namespace asset_editor_private
+
 void AssetEditor::Draw(AssetRegistry* registry) {
     switch (CurrentType) {
         case EAssetType::Texture: {
@@ -437,6 +472,10 @@ void AssetEditor::Draw(AssetRegistry* registry) {
         }
         case EAssetType::Spritesheet: {
             DrawSpritesheetTab(registry);
+            break;
+        }
+        case EAssetType::Enemy: {
+            DrawEnemyTab(registry);
             break;
         }
         default: {
@@ -552,6 +591,52 @@ void AssetEditor::DrawSpritesheetTab(AssetRegistry* registry) {
         DrawSpritesheetInspector(this, registry, sheet);
     } else {
         ImGui::TextWrapped("Select a spritesheet, or create one above.");
+    }
+    ImGui::EndChild();
+}
+
+void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
+    using namespace asset_editor_private;
+
+    // Creation form: a blueprint is created from just its id; stats are edited in the inspector.
+    ImGui::SeparatorText("Create Enemy");
+
+    ImGui::InputText("Output id", NewEnemyId, sizeof(NewEnemyId));
+    AssetId normalized = AssetId::Normalize(StringView(NewEnemyId));
+    ImGui::TextDisabled("-> %s", normalized.Value.Str());
+
+    if (ImGui::Button("Create")) {
+        if (EnemyAsset::Create(normalized)) {
+            registry->LoadEnemyBlueprint(normalized);
+            Selected = normalized;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Rescan assets/")) {
+        registry->CrawlAndLoad();
+    }
+
+    ImGui::Separator();
+
+    // List pane.
+    ImGui::BeginChild("enemy_list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
+    ImGui::TextDisabled("Enemies (%d)", registry->EnemyBlueprints.Size);
+    for (EnemyAsset& enemy : registry->EnemyBlueprints) {
+        bool selected = (enemy.Manifest.Id == Selected);
+        if (ImGui::Selectable(enemy.Manifest.Id.Value.Str(), selected)) {
+            Selected = enemy.Manifest.Id;
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    // Inspector pane.
+    ImGui::BeginChild("enemy_inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+    if (EnemyAsset* enemy = registry->FindEnemyBlueprint(Selected)) {
+        DrawEnemyInspector(enemy);
+    } else {
+        ImGui::TextWrapped("Select an enemy, or create one above.");
     }
     ImGui::EndChild();
 }
