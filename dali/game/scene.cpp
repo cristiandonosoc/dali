@@ -1,8 +1,9 @@
 #include <dali/game/scene.h>
 
-#include <yaml-cpp/yaml.h>
+#include <dali/core/memory.h>
+#include <dali/game/file.h>
 
-#include <fstream>
+#include <yaml-cpp/yaml.h>
 
 namespace kdk {
 
@@ -34,17 +35,13 @@ bool SaveScene(const World& world, StringView path) {
     out << YAML::EndSeq;
     out << YAML::EndMap;
 
-    std::ofstream file(path.Str());
-    if (!file.good()) {
-        return false;
-    }
-    file << out.c_str();
-    return file.good();
+    return WriteFile(path, std::span<const u8>((const u8*)out.c_str(), out.size()));
 }
 
 bool LoadScene(World* world, StringView path) {
-    std::ifstream file(path.Str());
-    if (!file.good()) {
+    auto scratch = Arena::GetScratch();
+    FileContents contents = ReadFile(scratch, path);
+    if (!contents.IsValid()) {
         return false;  // no scene on disk yet
     }
 
@@ -58,7 +55,7 @@ bool LoadScene(World* world, StringView path) {
     // We build without exceptions, so use the non-throwing as<T>(fallback) accessors — as<T>()
     // throws on a missing/mistyped field. The file is our own throwaway output, so anything
     // unexpected just resolves to defaults rather than a crash.
-    YAML::Node root = YAML::Load(file);
+    YAML::Node root = YAML::Load((const char*)contents.Data.data());
 
     if (root["goal"] && root["goal"].size() == 2) {
         world->Goal = Hex{root["goal"][0].as<int>(0), root["goal"][1].as<int>(0)};

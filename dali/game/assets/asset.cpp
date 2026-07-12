@@ -2,6 +2,10 @@
 
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
+#include <dali/game/file.h>
+#include <dali/game/log.h>
+
+#include <yaml-cpp/yaml.h>
 
 namespace kdk {
 
@@ -31,6 +35,7 @@ StringView ToString(EAssetType type) {
     switch (type) {
         case EAssetType::Invalid: return "invalid"sv;
         case EAssetType::Texture: return "texture"sv;
+        case EAssetType::Spritesheet: return "spritesheet"sv;
         case EAssetType::COUNT: break;
     }
     ASSERT(false);
@@ -40,6 +45,9 @@ StringView ToString(EAssetType type) {
 EAssetType AssetTypeFromString(StringView str) {
     if (str == "texture"sv) {
         return EAssetType::Texture;
+    }
+    if (str == "spritesheet"sv) {
+        return EAssetType::Spritesheet;
     }
     return EAssetType::Invalid;
 }
@@ -120,6 +128,31 @@ bool AssetId::IsValid() const {
 StringView GetAssetsRoot(Arena* arena) {
     StringView base = paths::GetBaseDir(arena);
     return paths::PathJoin(arena, base, "assets"sv);
+}
+
+StringView AssetYmlPath(Arena* arena, AssetId id) {
+    return Printf(arena, "%s/%s.yml", GetAssetsRoot(arena).Str(), id.Value.Str());
+}
+
+StringView AssetPayloadPath(Arena* arena, AssetId id) {
+    return Printf(arena, "%s/%s.asset", GetAssetsRoot(arena).Str(), id.Value.Str());
+}
+
+bool PeekManifest(AssetId id, AssetManifest* out) {
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+
+    FileContents contents = ReadFile(arena, AssetYmlPath(arena, id));
+    if (!contents.IsValid()) {
+        return false;
+    }
+    YAML::Node node = YAML::Load((const char*)contents.Data.data());
+
+    // We build without exceptions: as<T>(fallback) never throws on a missing/mistyped field.
+    out->Type = AssetTypeFromString(StringView(node["type"].as<std::string>("invalid").c_str()));
+    out->Version = node["version"].as<int>(0);
+    out->Id = id;
+    return true;
 }
 
 }  // namespace kdk

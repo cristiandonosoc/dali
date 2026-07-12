@@ -6,11 +6,10 @@ namespace kdk {
 
 struct Arena;
 
-// Only Texture exists for now. Spritesheet and friends come later; the enum is kept minimal so
-// unhandled switches don't accumulate placeholder cases before there's anything to handle.
 enum class EAssetType : u8 {
     Invalid = 0,
     Texture,
+    Spritesheet,
     COUNT,
 };
 // The lowercase token used in a manifest's `type:` field ("texture").
@@ -49,5 +48,12 @@ struct AssetManifest {
 
 // Absolute path to the assets/ directory (GetBaseDir()/assets), interned into |arena|.
 StringView GetAssetsRoot(Arena* arena);
+// The on-disk paths of an asset's manifest and payload: <assets>/<id>.yml and <assets>/<id>.asset.
+StringView AssetYmlPath(Arena* arena, AssetId id);
+StringView AssetPayloadPath(Arena* arena, AssetId id);
+
+// Reads just the common header (type, version, id) of the manifest at |id|. Enough to dispatch the
+// crawl by type before handing off to the type's own loader. Returns false if the .yml is unreadable.
+bool PeekManifest(AssetId id, AssetManifest* out);
 
 }  // namespace kdk

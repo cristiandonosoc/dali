@@ -47,8 +47,11 @@ struct FileDialogFilter {
 // a POD filled in by the platform, so it crosses the DLL boundary with no vtable coupling and a
 // reload never invalidates it.
 struct PlatformAPI {
-    // Reads a whole file into |arena|. Invalid FileContents on failure.
+    // Reads a whole file into |arena|. Invalid FileContents on failure. The buffer is null-
+    // terminated one byte past Data's end (not counted in the size), so text callers can read
+    // Data.data() as a C string.
     FileContents (*ReadFile)(Arena* arena, StringView path) = nullptr;
+    // Writes |data| to |path|, creating any missing parent directories. false on failure.
     bool (*WriteFile)(StringView path, std::span<const u8> data) = nullptr;
 
     // Appends one line to the platform log.

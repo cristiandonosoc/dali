@@ -1,0 +1,11 @@
+type: spritesheet
+version: 2
+id: spritesheets/goblin
+textures:
+  - {texture: textures/goblin/d_walk, grid: {cell_w: 48, cell_h: 48, margin: 0, spacing: 0}}
+  - {texture: textures/goblin/s_walk, grid: {cell_w: 48, cell_h: 48, margin: 0, spacing: 0}}
+  - {texture: textures/goblin/u_walk, grid: {cell_w: 48, cell_h: 48, margin: 0, spacing: 0}}
+clips:
+  - {name: d_walk, texture: textures/goblin/d_walk, frames: [0, 1, 2, 3, 4, 5]}
+  - {name: s_walk, texture: textures/goblin/d_walk, frames: [0, 1, 2, 3, 4, 5]}
+  - {name: u_walk, texture: textures/goblin/u_walk, frames: [0, 1, 2, 3, 4, 5]}

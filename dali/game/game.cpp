@@ -922,12 +922,45 @@ float DrawMainMenuBar(GameState* gs) {
     return height;
 }
 
-// The Assets view: the asset importer/inspector. The window shell lives here; the contents are the
-// AssetEditor.
-void DrawAssetsMode(GameState* gs, float menu_bar_height) {
+// A secondary, full-width menu bar just below the main one, with one entry per asset type. Switches
+// which asset type the editor is showing.
+void DrawAssetTypeBar(GameState* gs, float menu_bar_height) {
     ImGuiIO& io = ImGui::GetIO();
+    float bar_height = ImGui::GetFrameHeight();
     ImGui::SetNextWindowPos(ImVec2(0.0f, menu_bar_height));
-    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, io.DisplaySize.y - menu_bar_height));
+    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, bar_height));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
+    ImGui::Begin("##AssetTypeBar", nullptr, flags);
+    if (ImGui::BeginMenuBar()) {
+        for (i32 t = (i32)EAssetType::Texture; t < (i32)EAssetType::COUNT; ++t) {
+            EAssetType type = (EAssetType)t;
+            // Menu label = the type token with a capitalized first letter ("texture" -> "Texture").
+            char label[64];
+            snprintf(label, sizeof(label), "%s", ToString(type).Str());
+            if (label[0] >= 'a' && label[0] <= 'z') {
+                label[0] = (char)(label[0] - 'a' + 'A');
+            }
+            bool is_selected = gs->AssetEditor.CurrentType == type;
+            if (ImGui::MenuItem(label, nullptr, is_selected)) {
+                gs->AssetEditor.CurrentType = type;
+            }
+        }
+        ImGui::EndMenuBar();
+    }
+    ImGui::End();
+}
+
+// The Assets view: a secondary type bar, then the type's create/list/inspect UI. The window shell
+// lives here; the contents are the AssetEditor.
+void DrawAssetsMode(GameState* gs, float menu_bar_height) {
+    DrawAssetTypeBar(gs, menu_bar_height);
+
+    ImGuiIO& io = ImGui::GetIO();
+    float top = menu_bar_height + ImGui::GetFrameHeight();  // main menu bar + type bar
+    ImGui::SetNextWindowPos(ImVec2(0.0f, top));
+    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, io.DisplaySize.y - top));
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
     ImGui::Begin("Assets", nullptr, flags);

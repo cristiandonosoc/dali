@@ -2,28 +2,15 @@
 
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
+#include <dali/game/file.h>
 #include <dali/game/log.h>
 
 #include <stb/stb_image.h>
 #include <yaml-cpp/yaml.h>
 
-#include <filesystem>
-#include <fstream>
-#include <system_error>
-
 namespace kdk {
 
 namespace texture_asset_private {
-
-StringView YmlPath(Arena* arena, AssetId id) {
-    StringView root = GetAssetsRoot(arena);
-    return Printf(arena, "%s/%s.yml", root.Str(), id.Value.Str());
-}
-
-StringView AssetPath(Arena* arena, AssetId id) {
-    StringView root = GetAssetsRoot(arena);
-    return Printf(arena, "%s/%s.asset", root.Str(), id.Value.Str());
-}
 
 // Emits the texture manifest to disk (creating parent directories). Shared by Import and
 // SaveManifest so the schema lives in one place.
@@ -35,10 +22,7 @@ bool WriteManifest(Arena* arena,
                    i32 channels,
                    ETextureFilter filter,
                    bool flip) {
-    StringView yml_path = YmlPath(arena, id);
-
-    std::error_code ec;
-    std::filesystem::create_directories(paths::GetDirname(arena, yml_path).Str(), ec);
+    StringView yml_path = AssetYmlPath(arena, id);
 
     YAML::Emitter emit;
     emit << YAML::BeginMap;
@@ -53,13 +37,11 @@ bool WriteManifest(Arena* arena,
     emit << YAML::Key << "filter" << YAML::Value << (i32)filter;
     emit << YAML::EndMap;
 
-    std::ofstream out(yml_path.Str());
-    if (!out.good()) {
+    if (!WriteFile(yml_path, std::span<const u8>((const u8*)emit.c_str(), emit.size()))) {
         LogError("TextureAsset: cannot write manifest '%s'", yml_path.Str());
         return false;
     }
-    out << emit.c_str();
-    return out.good();
+    return true;
 }
 
 }  // namespace texture_asset_private
@@ -97,21 +79,11 @@ bool TextureAsset::Import(StringView source_raw,
     DEFER { stbi_image_free(data); };
 
     // Write the payload: tightly-packed pixels, exactly width*height*channels bytes.
-    StringView asset_path = AssetPath(arena, id);
-    {
-        std::error_code ec;
-        std::filesystem::create_directories(paths::GetDirname(arena, asset_path).Str(), ec);
-
-        std::ofstream out(asset_path.Str(), std::ios::binary);
-        if (!out.good()) {
-            LogError("TextureAsset::Import: cannot write payload '%s'", asset_path.Str());
-            return false;
-        }
-        out.write((const char*)data, (std::streamsize)(width * height * channels));
-        if (!out.good()) {
-            LogError("TextureAsset::Import: failed writing payload '%s'", asset_path.Str());
-            return false;
-        }
+    StringView asset_path = AssetPayloadPath(arena, id);
+    std::span<const u8> pixels(data, (size_t)(width * height * channels));
+    if (!WriteFile(asset_path, pixels)) {
+        LogError("TextureAsset::Import: cannot write payload '%s'", asset_path.Str());
+        return false;
     }
 
     if (!WriteManifest(arena, id, source_raw, width, height, channels, filter, settings.FlipVertically)) {
@@ -128,12 +100,11 @@ std::optional<TextureAsset> TextureAsset::LoadFromDisk(AssetId id) {
     auto scratch = Arena::GetScratch();
     Arena* arena = scratch;
 
-    StringView yml_path = YmlPath(arena, id);
-    std::ifstream file(yml_path.Str());
-    if (!file.good()) {
+    FileContents yml = ReadFile(arena, AssetYmlPath(arena, id));
+    if (!yml.IsValid()) {
         return std::nullopt;
     }
-    YAML::Node node = YAML::Load(file);
+    YAML::Node node = YAML::Load((const char*)yml.Data.data());
 
     // We build without exceptions: as<T>(fallback) never throws on a missing/mistyped field.
     EAssetType type = AssetTypeFromString(StringView(node["type"].as<std::string>("invalid").c_str()));
@@ -173,23 +144,14 @@ std::optional<TextureAsset> TextureAsset::LoadFromDisk(AssetId id) {
     asset.Manifest.HasPayload = true;
     asset.Settings.FlipVertically = node["flip"].as<int>(0) != 0;
 
-    StringView asset_path = AssetPath(arena, id);
-    std::ifstream payload(asset_path.Str(), std::ios::binary | std::ios::ate);
-    if (!payload.good()) {
+    StringView asset_path = AssetPayloadPath(arena, id);
+    FileContents payload = ReadFile(arena, asset_path);
+    if (!payload.IsValid()) {
         LogError("TextureAsset: missing payload '%s'", asset_path.Str());
         return std::nullopt;
     }
-    std::streamsize size = payload.tellg();
-    payload.seekg(0);
-    std::span<u8> buffer = arena->Push((u64)size);
-    payload.read((char*)buffer.data(), size);
-    if (!payload.good()) {
-        LogError("TextureAsset: failed reading payload '%s'", asset_path.Str());
-        return std::nullopt;
-    }
 
-    asset.Resource =
-        Texture::FromPixels(std::span<const u8>(buffer.data(), (size_t)size), width, height, channels, filter);
+    asset.Resource = Texture::FromPixels(payload.Data, width, height, channels, filter);
     if (!asset.Resource.IsValid()) {
         return std::nullopt;
     }

@@ -48,7 +48,27 @@ void CrawlDir(AssetRegistry* registry, Arena* arena, StringView abs_dir, StringV
         }
 
         AssetId id = AssetId::Normalize(rel);
-        registry->LoadTexture(id);
+
+        // Peek the type to dispatch to the right loader (each loader re-reads the file; the peek
+        // avoids trying every loader against every file).
+        AssetManifest header = {};
+        if (!PeekManifest(id, &header)) {
+            continue;
+        }
+        switch (header.Type) {
+            case EAssetType::Texture: {
+                registry->LoadTexture(id);
+                break;
+            }
+            case EAssetType::Spritesheet: {
+                registry->LoadSpritesheet(id);
+                break;
+            }
+            default: {
+                LogWarning("AssetRegistry: unknown asset type in '%s'", id.Value.Str());
+                break;
+            }
+        }
     }
 }
 
@@ -57,18 +77,31 @@ void CrawlDir(AssetRegistry* registry, Arena* arena, StringView abs_dir, StringV
 void AssetRegistry::CrawlAndLoad() {
     using namespace registry_private;
 
-    // Free existing GPU textures before dropping the entries, or the handles leak.
+    // Free existing GPU textures before dropping the entries, or the handles leak. Spritesheets own
+    // no GPU resource, so clearing them is enough.
     for (TextureAsset& tex : Textures) {
         tex.Resource.Destroy();
     }
     Textures.Clear();
+    Spritesheets.Clear();
 
     auto scratch = Arena::GetScratch();
     Arena* arena = scratch;
     StringView root = GetAssetsRoot(arena);
     CrawlDir(this, arena, root, StringView());
 
-    LogInfo("AssetRegistry: loaded %d textures", Textures.Size);
+    // A spritesheet may be crawled before the texture it references, so references are resolved in a
+    // second pass once everything is loaded.
+    ResolveReferences();
+
+    LogInfo("AssetRegistry: loaded %d textures, %d spritesheets", Textures.Size, Spritesheets.Size);
+}
+
+void AssetRegistry::ResolveReferences() {
+    // Orchestration only: each asset knows its own references and resolves them against us.
+    for (SpritesheetAsset& sheet : Spritesheets) {
+        sheet.ResolveReferences(*this);
+    }
 }
 
 TextureAsset* AssetRegistry::LoadTexture(AssetId id) {
@@ -97,6 +130,37 @@ TextureAsset* AssetRegistry::FindTexture(AssetId id) {
     for (TextureAsset& tex : Textures) {
         if (tex.Manifest.Id == id) {
             return &tex;
+        }
+    }
+    return nullptr;
+}
+
+SpritesheetAsset* AssetRegistry::LoadSpritesheet(AssetId id) {
+    std::optional<SpritesheetAsset> loaded = SpritesheetAsset::LoadFromDisk(id);
+    if (!loaded) {
+        return nullptr;
+    }
+
+    // Does not resolve the texture reference here — the caller runs ResolveReferences once all
+    // assets are present (during a crawl the referenced texture may not be loaded yet).
+    if (SpritesheetAsset* existing = FindSpritesheet(id)) {
+        *existing = *loaded;
+        return existing;
+    }
+
+    if (Spritesheets.IsFull()) {
+        LogError("AssetRegistry: spritesheet capacity (%d) reached, dropping '%s'",
+                 kMaxSpritesheets,
+                 id.Value.Str());
+        return nullptr;
+    }
+    return &Spritesheets.Push(*loaded);
+}
+
+SpritesheetAsset* AssetRegistry::FindSpritesheet(AssetId id) {
+    for (SpritesheetAsset& sheet : Spritesheets) {
+        if (sheet.Manifest.Id == id) {
+            return &sheet;
         }
     }
     return nullptr;

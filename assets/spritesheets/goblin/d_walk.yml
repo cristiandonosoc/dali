@@ -1,0 +1,7 @@
+type: spritesheet
+version: 1
+id: spritesheets/goblin/d_walk
+texture: textures/goblin/d_walk
+grid: {cell_w: 24, cell_h: 18, margin: 0, spacing: 0}
+clips:
+  []

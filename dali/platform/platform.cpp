@@ -29,6 +29,32 @@ void Log(ELogSeverity severity, StringView message) {
     SDL_Log("[%s] %s", ToString(severity).Str(), message.Str());
 }
 
+// Named with a Platform prefix so they never collide with the WIN32 ::ReadFile / ::WriteFile that
+// <windows.h> (pulled in transitively) declares.
+FileContents PlatformReadFile(Arena* arena, StringView path) {
+    size_t size = 0;
+    void* data = SDL_LoadFile(path.Str(), &size);
+    if (!data) {
+        return {};
+    }
+    // +1 for a convenience null terminator (text callers read Data as a C string); Data's size
+    // excludes it.
+    std::span<u8> buffer = arena->Push(size + 1);
+    std::memcpy(buffer.data(), data, size);
+    buffer[size] = 0;
+    SDL_free(data);
+    return FileContents{.Data = std::span<u8>(buffer.data(), size)};
+}
+
+bool PlatformWriteFile(StringView path, std::span<const u8> data) {
+    auto scratch = Arena::GetScratch();
+    StringView dir = paths::GetDirname(scratch, path);
+    if (!dir.IsEmpty()) {
+        SDL_CreateDirectory(dir.Str());  // makes intermediate directories; no-op if it exists
+    }
+    return SDL_SaveFile(path.Str(), data.data(), data.size_bytes());
+}
+
 bool OpenFileDialog(Arena* arena, StringView* out_path, std::span<const FileDialogFilter> filters) {
     // Map the neutral filters to NFD's item type on the stack (16 is plenty for a dialog).
     nfdfilteritem_t items[16] = {};
@@ -202,6 +228,8 @@ bool PlatformInit(PlatformState* ps, const PlatformInitConfig& config) {
     using namespace platform_private;
 
     ps->API.Log = Log;
+    ps->API.ReadFile = PlatformReadFile;
+    ps->API.WriteFile = PlatformWriteFile;
     ps->API.GLGetProcAddress = (decltype(ps->API.GLGetProcAddress))SDL_GL_GetProcAddress;
     ps->API.OpenFileDialog = OpenFileDialog;
     ps->API.OpenContainingFolder = OpenContainingFolder;

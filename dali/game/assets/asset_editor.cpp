@@ -203,9 +203,249 @@ void DrawInspector(AssetEditor* editor, TextureAsset* tex) {
     ImGui::EndChild();
 }
 
+// Grid-overlay preview of one texture ref: the texture with its cell boundaries drawn on top
+// (reusing the ref's own FrameRect so it matches what the runtime samples), the selected frame
+// highlighted.
+void DrawTextureRefPreview(AssetEditor* editor, const SpriteTextureRef& ref) {
+    if (!ref._Resolved) {
+        ImGui::TextWrapped("Texture '%s' is not resolved.", ref.Texture.Value.Str());
+        return;
+    }
+    const Texture& res = ref._Resolved->Resource;
+    i32 frame_count = ref.FrameCount();
+
+    ImGui::SliderFloat("Zoom", &editor->PreviewZoom, 0.5f, 16.0f, "%.1fx");
+    if (frame_count > 0) {
+        i32 max_frame = frame_count - 1;
+        if (editor->PreviewFrame < 0) {
+            editor->PreviewFrame = 0;
+        }
+        if (editor->PreviewFrame > max_frame) {
+            editor->PreviewFrame = max_frame;
+        }
+        ImGui::SliderInt("Frame", &editor->PreviewFrame, 0, max_frame);
+    }
+
+    // Fixed, modest height so the preview doesn't eat the whole inspector (and hide the Clips
+    // section below it); it scrolls if the image is larger.
+    ImGui::BeginChild("ref_preview", ImVec2(0.0f, 300.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+    if (res.IsValid()) {
+        float zoom = editor->PreviewZoom;
+        ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImGui::Image((ImTextureID)res.ImGuiId(), ImVec2(res.Width * zoom, res.Height * zoom));
+
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        for (i32 f = 0; f < frame_count; ++f) {
+            SpriteTextureRef::FrameUV uv = ref.FrameRect(f);
+            ImVec2 tl(origin.x + uv.Uv0.x * res.Width * zoom, origin.y + uv.Uv0.y * res.Height * zoom);
+            ImVec2 br(origin.x + uv.Uv1.x * res.Width * zoom, origin.y + uv.Uv1.y * res.Height * zoom);
+            bool is_selected = (f == editor->PreviewFrame);
+            ImU32 color = is_selected ? IM_COL32(255, 220, 60, 255) : IM_COL32(255, 255, 255, 90);
+            float thickness = is_selected ? 2.0f : 1.0f;
+            draw->AddRect(tl, br, color, 0.0f, 0, thickness);
+        }
+    }
+    ImGui::EndChild();
+}
+
+// Playback preview for one clip: editor-local fps/loop advance the clip and draw its current frame
+// (the frame's sub-rect of the referenced texture). Playback params live here, not on the clip.
+void DrawClipPlayback(AssetEditor* editor, SpritesheetAsset* sheet, SpriteClip& clip) {
+    ImGui::SliderFloat("FPS", &editor->ClipFps, 1.0f, 30.0f, "%.0f");
+    ImGui::Checkbox("Loop", &editor->ClipLoop);
+    ImGui::SameLine();
+    if (ImGui::Button(editor->ClipPlaying ? "Pause" : "Play")) {
+        editor->ClipPlaying = !editor->ClipPlaying;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Restart")) {
+        editor->ClipTime = 0.0f;
+    }
+
+    const SpriteTextureRef* ref = sheet->FindTextureRef(clip.Texture);
+    if (!ref) {
+        ImGui::TextWrapped("References texture '%s', not in this sheet.", clip.Texture.Value.Str());
+        return;
+    }
+    if (ImGui::Button("Fill all frames")) {
+        clip.Frames.Clear();
+        i32 count = ref->FrameCount();
+        for (i32 f = 0; f < count; ++f) {
+            if (clip.Frames.IsFull()) {
+                break;
+            }
+            clip.Frames.Push(f);
+        }
+    }
+
+    if (editor->ClipPlaying) {
+        editor->ClipTime += ImGui::GetIO().DeltaTime;
+    }
+
+    i32 frame = clip.At(editor->ClipTime, editor->ClipFps, editor->ClipLoop);
+    if (frame == NONE) {
+        ImGui::TextDisabled("(empty clip)");
+        return;
+    }
+    SpriteTextureRef::FrameUV uv = ref->FrameRect(frame);
+    ImGui::Text("Frame %d", frame);
+    float zoom = editor->PreviewZoom;
+    ImGui::Image((ImTextureID)uv.Handle,
+                 ImVec2(uv.Width * zoom, uv.Height * zoom),
+                 ImVec2(uv.Uv0.x, uv.Uv0.y),
+                 ImVec2(uv.Uv1.x, uv.Uv1.y));
+}
+
+void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, SpritesheetAsset* sheet) {
+    ImGui::Text("Id: %s", sheet->Manifest.Id.Value.Str());
+    ImGui::SameLine();
+    if (ImGui::Button("Save")) {
+        sheet->SaveManifest();
+    }
+
+    // --- Texture references (each with its own grid) ---
+    ImGui::SeparatorText("Texture References");
+
+    // The textures already loaded in the registry, available to add as references. Already-added
+    // ones are greyed out.
+    ImGui::TextDisabled("Loaded textures (%d)", registry->Textures.Size);
+    ImGui::BeginChild("loaded_textures", ImVec2(0.0f, 110.0f), ImGuiChildFlags_Borders);
+    for (TextureAsset& tex : registry->Textures) {
+        ImGui::PushID((const void*)&tex);
+        bool referenced = sheet->FindTextureRef(tex.Manifest.Id) != nullptr;
+        ImGui::BeginDisabled(referenced);
+        if (ImGui::SmallButton("Add")) {
+            if (!sheet->Textures.IsFull()) {
+                SpriteTextureRef ref = {};
+                ref.Texture = tex.Manifest.Id;
+                sheet->Textures.Push(ref);
+                sheet->ResolveReferences(*registry);  // resolve the freshly added ref
+                editor->SelectedRef = tex.Manifest.Id;
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::Text("%s", tex.Manifest.Id.Value.Str());
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+
+    // The references this sheet already has: pick one to preview, edit its grid, remove.
+    i32 remove_ref = NONE;
+    for (i32 i = 0; i < sheet->Textures.Size; ++i) {
+        SpriteTextureRef& ref = sheet->Textures[i];
+        ImGui::PushID((const void*)&ref);
+        bool is_selected = ref.Texture == editor->SelectedRef;
+        if (ImGui::RadioButton("##sel", is_selected)) {
+            editor->SelectedRef = ref.Texture;
+        }
+        ImGui::SameLine();
+        ImGui::Text("%s  (%d frames)", ref.Texture.Value.Str(), ref.FrameCount());
+        // Only the selected reference expands its grid controls; the rest stay one-liners.
+        if (is_selected) {
+            ImGui::InputInt("Cell W", &ref.Grid.CellW);
+            ImGui::InputInt("Cell H", &ref.Grid.CellH);
+            ImGui::InputInt("Margin", &ref.Grid.Margin);
+            ImGui::InputInt("Spacing", &ref.Grid.Spacing);
+            if (ImGui::Button("Remove")) {
+                remove_ref = i;
+            }
+            ImGui::Separator();
+        }
+        ImGui::PopID();
+    }
+    if (remove_ref != NONE) {
+        sheet->Textures.RemoveUnorderedAt(remove_ref);
+    }
+
+    if (const SpriteTextureRef* ref = sheet->FindTextureRef(editor->SelectedRef)) {
+        DrawTextureRefPreview(editor, *ref);
+    }
+
+    // --- Clips (each over one texture ref) ---
+    ImGui::SeparatorText("Clips");
+
+    ImGui::InputText("Name", editor->NewClipName, sizeof(editor->NewClipName));
+    const char* clip_ref_preview =
+        editor->NewClipTexture.IsValid() ? editor->NewClipTexture.Value.Str() : "(choose ref)";
+    if (ImGui::BeginCombo("Ref", clip_ref_preview)) {
+        for (SpriteTextureRef& ref : sheet->Textures) {
+            bool selected = ref.Texture == editor->NewClipTexture;
+            if (ImGui::Selectable(ref.Texture.Value.Str(), selected)) {
+                editor->NewClipTexture = ref.Texture;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    bool can_add_clip = editor->NewClipName[0] != '\0';
+    can_add_clip &= editor->NewClipTexture.IsValid();
+    ImGui::BeginDisabled(!can_add_clip);
+    if (ImGui::Button("Add Clip")) {
+        if (!sheet->Clips.IsFull()) {
+            SpriteClip clip = {};
+            clip.Name = StringView(editor->NewClipName);
+            clip.Texture = editor->NewClipTexture;
+            // Default to all of the ref's frames in order (the common one-texture-per-clip case).
+            if (const SpriteTextureRef* ref = sheet->FindTextureRef(clip.Texture)) {
+                i32 count = ref->FrameCount();
+                for (i32 f = 0; f < count; ++f) {
+                    if (clip.Frames.IsFull()) {
+                        break;
+                    }
+                    clip.Frames.Push(f);
+                }
+            }
+            sheet->Clips.Push(clip);
+        }
+    }
+    ImGui::EndDisabled();
+
+    i32 remove_clip = NONE;
+    for (i32 i = 0; i < sheet->Clips.Size; ++i) {
+        SpriteClip& clip = sheet->Clips[i];
+        ImGui::PushID((const void*)&clip);
+        bool is_selected = clip.Name == editor->SelectedClip;
+        if (ImGui::RadioButton("##selclip", is_selected)) {
+            editor->SelectedClip = clip.Name;
+            editor->ClipTime = 0.0f;
+        }
+        ImGui::SameLine();
+        ImGui::Text("%s  <-  %s  [%d frames]", clip.Name.Str(), clip.Texture.Value.Str(), clip.Frames.Size);
+        // Only the selected clip expands to playback controls + remove.
+        if (is_selected) {
+            DrawClipPlayback(editor, sheet, clip);
+            if (ImGui::Button("Remove")) {
+                remove_clip = i;
+            }
+            ImGui::Separator();
+        }
+        ImGui::PopID();
+    }
+    if (remove_clip != NONE) {
+        sheet->Clips.RemoveUnorderedAt(remove_clip);
+    }
+}
+
 }  // namespace asset_editor_private
 
 void AssetEditor::Draw(AssetRegistry* registry) {
+    switch (CurrentType) {
+        case EAssetType::Texture: {
+            DrawTextureTab(registry);
+            break;
+        }
+        case EAssetType::Spritesheet: {
+            DrawSpritesheetTab(registry);
+            break;
+        }
+        default: {
+            break;
+        }
+    }
+}
+
+void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
     using namespace asset_editor_private;
 
     // Creation form.
@@ -264,6 +504,54 @@ void AssetEditor::Draw(AssetRegistry* registry) {
         DrawInspector(this, tex);
     } else {
         ImGui::TextWrapped("Select a texture, or create one above.");
+    }
+    ImGui::EndChild();
+}
+
+void AssetEditor::DrawSpritesheetTab(AssetRegistry* registry) {
+    using namespace asset_editor_private;
+
+    // Creation form: a spritesheet is a concept, created from just its id. Textures and clips are
+    // added in the inspector.
+    ImGui::SeparatorText("Create Spritesheet");
+
+    ImGui::InputText("Output id", NewSheetId, sizeof(NewSheetId));
+    AssetId normalized = AssetId::Normalize(StringView(NewSheetId));
+    ImGui::TextDisabled("-> %s", normalized.Value.Str());
+
+    if (ImGui::Button("Create")) {
+        if (SpritesheetAsset::Create(normalized)) {
+            registry->LoadSpritesheet(normalized);
+            registry->ResolveReferences();
+            Selected = normalized;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Rescan assets/")) {
+        registry->CrawlAndLoad();
+    }
+
+    ImGui::Separator();
+
+    // List pane.
+    ImGui::BeginChild("sheet_list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
+    ImGui::TextDisabled("Spritesheets (%d)", registry->Spritesheets.Size);
+    for (SpritesheetAsset& sheet : registry->Spritesheets) {
+        bool selected = (sheet.Manifest.Id == Selected);
+        if (ImGui::Selectable(sheet.Manifest.Id.Value.Str(), selected)) {
+            Selected = sheet.Manifest.Id;
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    // Inspector pane.
+    ImGui::BeginChild("sheet_inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+    if (SpritesheetAsset* sheet = registry->FindSpritesheet(Selected)) {
+        DrawSpritesheetInspector(this, registry, sheet);
+    } else {
+        ImGui::TextWrapped("Select a spritesheet, or create one above.");
     }
     ImGui::EndChild();
 }
