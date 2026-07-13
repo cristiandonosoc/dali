@@ -123,38 +123,56 @@ dims/settings to `.yml`; load reads the payload and uploads via `Texture::FromPi
 - **Save** rewrites `.yml`; **Re-import** re-decodes from the stored `source`. Creating with an
   existing id *is* re-import — one code path.
 
-## Spritesheets (v2)
+## Spritesheets (v3)
 
-A spritesheet is a **concept** (“goblin”), not one texture. Two layers:
+A spritesheet is a **concept** (“goblin”), not one texture: it's just a named **bag of clips**. Each
+clip is self-contained — it carries its own texture reference and its own grid, and its frames are
+baked to ready-to-sample UV rects at resolve time. There is no separate texture-reference layer (v2
+had one; the clip → ref lookup and per-draw UV math were the awkward seam that motivated the v3
+collapse).
 
-- **Texture references** (`SpriteTextureRef { Texture(id), Grid, _Resolved }`) — a concept pulls from
-  *several* textures (each little animation may be its own PNG). The **grid** (cell size, margin,
-  spacing) lives here, per texture, because a texture is sliced one way. Frame geometry
-  (`FrameCount`, `FrameRect(frame) → {handle, uv0, uv1}`) is on the ref.
-- **Clips** (`SpriteClip { Name, Texture(id), Frames }`) — named animations built *against* a
-  reference. A clip picks one ref (by texture id) and an ordered list of frame indices.
+**One struct:** `SpriteClip { Name, Texture(id), Grid, Frames[cell indices] }` — plus resolved/baked
+fields (`_Resolved`, `_Handle`, `_CellSize`, `_Frames[UV rects]`) that are **not serialized**.
+
+- **Frames are stored as cell indices** (the source of truth on disk). They're reimport-safe: the
+  grid is in pixels, so anything that changes the texture geometry already forces you to re-slice, at
+  which point the bake re-runs anyway. See the design note below.
+- **Grid** (cell size, margin, spacing) lives on the clip, because a clip slices one texture one way.
+- **Baked geometry is clip-level, not per-frame.** Every frame of a clip samples the same texture, so
+  the GL handle (`_Handle`) and cell size (`_CellSize`) hoist to the clip; a baked frame (`FrameUv`)
+  is *just* a UV rectangle (`{Uv0, Uv1}`).
 
 ```yaml
 type: spritesheet
-version: 2
+version: 3
 id: spritesheets/goblin
-textures:
-  - { texture: textures/goblin/walk_down, grid: { cell_w: 64, cell_h: 64, margin: 0, spacing: 0 } }
 clips:
-  - { name: walk_down, texture: textures/goblin/walk_down, frames: [0, 1, 2, 3] }
+  - name: walk_down
+    texture: textures/goblin/walk_down
+    grid: { cell_w: 64, cell_h: 64, margin: 0, spacing: 0 }
+    frames: [0, 1, 2, 3]
 ```
 
 **Playback params are the caller’s, not the clip’s.** A clip is just frames; `fps` and `loop` are
-supplied by whoever plays it. `SpriteClip::At(time, fps, loop)` maps elapsed time to a frame index.
-The runtime draw chain:
+supplied by whoever plays it. `SpriteClip::At(time, fps, loop)` maps elapsed time to a **playback
+position** (`0..Frames.Size-1`). The runtime draw chain — no lookup, no per-frame math:
 
 ```
-clip → sheet.FindTextureRef(clip.Texture) → ref.FrameRect(clip.At(time, fps, loop)) → draw (handle + uv rect)
+clip → pos = clip.At(time, fps, loop) → draw(clip._Handle, clip._CellSize, clip._Frames[pos])
 ```
 
-> **Known rough edge:** the spritesheet API is functional but wants a cleaner pass (e.g. a single
-> `Resolve(clip, time, fps, loop) → FrameUV` convenience, per-frame clip editing beyond “fill all”,
-> and cascade cleanup so removing a texture ref doesn’t leave clips dangling).
+**Bake happens at resolve time, never at load.** `SpriteClip::Resolve` links the texture and fills
+`_Handle` / `_CellSize` / `_Frames` from the grid + live texture dims. This runs in the registry's
+second pass (`ResolveReferences`, after all textures are loaded — a sheet can be crawled before its
+texture), and the editor re-runs it after *every* clip edit (texture/grid/frame change) so the baked
+frames the preview samples stay current. `CellRect`/`CellCount` compute live from the grid (the
+editor's frame-picker overlay uses them, so it's correct even before a re-bake).
+
+> **Why bake and not recompute-live?** Baked UVs depend on texture pixel dims (`u/texW`), so they'd
+> go “stale” if a texture is re-imported at a different resolution. That's a non-problem: the grid is
+> in pixels, so a resolution change already invalidates the slicing and sends you back to the editor
+> to re-slice — the re-bake is a byproduct of a step you were taking anyway. There's no scenario
+> where live-recompute quietly gets something right that baking gets wrong.
 
 ## Enemies (v1)
 
@@ -219,14 +237,15 @@ per-type entries set `CurrentType`.
   a suggested (short) id, flip/filter, Create/Re-import. Inspector: metadata, live filter,
   Save/Re-import, and a zoomable preview.
 - **Spritesheet tab** — **Create takes just an id** (a concept has no single source). The inspector
-  is where it’s assembled:
-  - **Texture References** — a list of the registry’s *loaded textures* (already-referenced ones
-    greyed) to Add; the sheet’s refs below, each collapsing to its grid inputs + a **grid-overlay
-    preview** (cell boundaries drawn from the ref’s own `FrameRect`, so the overlay matches what the
-    runtime samples) only when selected.
-  - **Clips** — add (name + ref picker; frames default to all of the ref); the selected clip expands
-    to **playback** (editor-local fps/loop, Play/Pause/Restart, live frame preview via the resolve
-    chain; time advances off `ImGui::GetIO().DeltaTime`).
+  is a single **Clips** section (there's no separate texture-reference pane in v3):
+  - **Add a clip** — name + a texture picked from the registry's loaded textures; grid + frames are
+    set in the clip's own editor once it exists.
+  - **The selected clip expands** to: a texture combo, grid inputs (cell w/h, margin, spacing),
+    Fill-all / Clear, a **grid-overlay frame picker** (cells drawn live from the clip's grid;
+    click a cell to append it to the sequence, cells already in the clip are highlighted), and
+    **playback** (editor-local fps/loop, Play/Pause/Restart, current baked frame preview; time
+    advances off `ImGui::GetIO().DeltaTime`). Any edit re-resolves the clip so the baked frames the
+    preview samples stay current.
   - **Save** writes the manifest.
 - **Enemy tab** — Create takes just a (short) id; the inspector edits `InstanceData` in place
   (stat drags + a colour picker) and **Save** writes the manifest. No preview machinery — the colour
@@ -292,7 +311,8 @@ dali/game/
                           PeekManifest (crawl dispatch), IdRootForType/ShortId/AssetIdFromShort.
     texture_asset.h/.cpp  TextureAsset: Import(raw)->baked, LoadFromDisk, SaveManifest, Reimport.
     spritesheet_asset.h/.cpp
-                          SpriteGrid, SpriteTextureRef (+ FrameCount/FrameRect), SpriteClip (+ At),
+                          SpriteGrid, FrameUv (baked UV rect), SpriteClip (Texture+Grid+Frames;
+                          Resolve bakes _Handle/_CellSize/_Frames; CellCount/CellRect/At),
                           SpritesheetAsset: Create(id), LoadFromDisk, SaveManifest, ResolveReferences.
     enemy_asset.h/.cpp    InstanceData (the spawn snapshot), EnemyAsset: Create(id), LoadFromDisk,
                           SaveManifest. Colour <-> rrggbbaa hex.

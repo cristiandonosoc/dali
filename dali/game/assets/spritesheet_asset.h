@@ -11,7 +11,7 @@ namespace kdk {
 
 struct AssetRegistry;
 
-// How a texture is carved into equally-sized cells. A frame index counts cells left-to-right,
+// How a texture is carved into equally-sized cells. A cell index counts cells left-to-right,
 // top-to-bottom.
 struct SpriteGrid {
     i32 CellW = 0;
@@ -20,68 +20,72 @@ struct SpriteGrid {
     i32 Spacing = 0;  // Gap (px) between adjacent cells.
 };
 
-// One texture a spritesheet pulls from, plus how it's sliced. The grid lives here (per texture),
-// because a texture is cut one way; clips then select frames out of it.
-struct SpriteTextureRef {
-    AssetId Texture = {};  // "textures/goblin/walk_down"
-    SpriteGrid Grid = {};
-    // Resolved by the registry (SpritesheetAsset::ResolveReferences); null until then.
-    TextureAsset* _Resolved = nullptr;
-
-    // A frame's location within this texture: the GL handle plus its uv rectangle.
-    struct FrameUV {
-        u32 Handle = 0;
-        i32 Width = 0;
-        i32 Height = 0;
-        Vec2 Uv0 = {};
-        Vec2 Uv1 = {};
-    };
-
-    // How many whole cells fit. 0 if unresolved or the grid is degenerate.
-    i32 FrameCount() const;
-    // The uv rectangle of |frame|. Zeroed if unresolved / out of range.
-    FrameUV FrameRect(i32 frame) const;
+// A frame's sampled sub-rect within its texture, in normalized UVs. Baked at resolve time from the
+// clip's grid + live texture dimensions; never serialized (the yml stores cell indices instead).
+struct FrameUv {
+    Vec2 Uv0 = {};
+    Vec2 Uv1 = {};
 };
 
-// A named animation: an ordered sequence of frames taken from one of the sheet's texture refs.
-// Playback rate and looping are the caller's concern, not the clip's (see At).
+// A named animation over a single texture, sliced by its own grid. The frame list is stored as cell
+// indices (the source of truth, reimport-safe); at resolve time it's baked into _Frames (ready-to-
+// sample UV rects) and the texture is linked, so drawing a frame is a direct index with no
+// per-frame math and no sibling lookup. Playback rate and looping are the caller's concern, not the
+// clip's.
 struct SpriteClip {
     FixedString<64> Name = {};  // "walk_down"
-    AssetId Texture = {};       // which texture ref (by its texture id)
-    FixedVector<i32, 64> Frames = {};
+    AssetId Texture = {};       // "textures/goblin/walk_down"
+    SpriteGrid Grid = {};
+    FixedVector<i32, 64> Frames = {};  // cell indices, in playback order (serialized)
 
-    // Maps elapsed |time| to one of Frames using caller-supplied |fps| and |loop|. Returns a
-    // frame index (into the ref's cells), or NONE if empty. loop == false clamps on the last frame.
+    // Resolved / baked by Resolve(); not serialized. All frames of a clip sample the same texture,
+    // so the GL handle and cell size are clip-level, not per-frame.
+    TextureAsset* _Resolved = nullptr;
+    u32 _Handle = 0;                        // GL texture to bind when drawing this clip
+    Vec2 _CellSize = {};                    // draw-quad size in px (uniform grid)
+    FixedVector<FrameUv, 64> _Frames = {};  // parallel to Frames; what a draw call samples
+
+    // Links Texture against |registry| and bakes _Handle / _CellSize / _Frames from the grid + live
+    // texture dims. Returns whether the texture resolved.
+    bool Resolve(AssetRegistry& registry);
+
+    // How many whole cells the grid carves out of the resolved texture. 0 if unresolved or the grid
+    // is degenerate. Used by the editor's frame picker.
+    i32 CellCount() const;
+    // The UV rect of cell |cell| in the resolved texture, computed live from the grid (for the
+    // editor overlay). Zeroed if unresolved / out of range.
+    FrameUv CellRect(i32 cell) const;
+
+    // Maps elapsed |time| to a playback position (0..Frames.Size-1) using caller-supplied |fps| and
+    // |loop|. Returns NONE if empty. loop == false clamps on the last position. Index _Frames
+    // (baked UV) or Frames (cell index) with the result.
     i32 At(float time, float fps, bool loop) const;
 };
 
-// A spritesheet: one concept ("goblin"), assembled from many textures and the clips over them.
-// Pure metadata (yml-only). A concept can pull from several textures (each little animation may be
-// its own texture), so it holds a list of texture refs and a list of clips built against them.
+// A spritesheet: one concept ("goblin"), assembled from the clips over its textures. Pure metadata
+// (yml-only). Each clip carries its own texture reference and grid, so the sheet is just a named
+// bag of clips.
 struct SpritesheetAsset {
     static constexpr EAssetType kAssetType = EAssetType::Spritesheet;
-    static constexpr i32 kVersion = 2;
+    static constexpr i32 kVersion = 3;
     static constexpr StringView kIdRoot = "spritesheets"sv;
-    static constexpr i32 kMaxTextureRefs = 32;
     static constexpr i32 kMaxClips = 64;
 
     AssetManifest Manifest = {};
-    FixedVector<SpriteTextureRef, kMaxTextureRefs> Textures = {};
     FixedVector<SpriteClip, kMaxClips> Clips = {};
 
-    // Writes the manifest for a new, empty sheet (no textures, no clips) — a spritesheet is created
-    // from just its id; textures and clips are added in the inspector. Overwrites any existing.
+    // Writes the manifest for a new, empty sheet (no clips) — a spritesheet is created from just
+    // its id; clips are added in the inspector. Overwrites any existing.
     static bool Create(AssetId id);
     // Reads the manifest at |id|. nullopt if it isn't a spritesheet or the version mismatches. Does
-    // NOT resolve texture references (the registry does that).
+    // NOT resolve/bake clips (the registry does that in a second pass).
     static std::optional<SpritesheetAsset> LoadFromDisk(AssetId id);
     bool SaveManifest() const;
 
-    // Resolves every texture ref against |registry|. Logs each missing ref; returns whether all
-    // resolved.
+    // Resolves and bakes every clip against |registry|. Logs each clip whose texture is missing;
+    // returns whether all resolved.
     bool ResolveReferences(AssetRegistry& registry);
 
-    const SpriteTextureRef* FindTextureRef(AssetId texture) const;
     const SpriteClip* FindClip(StringView name) const;
 };
 

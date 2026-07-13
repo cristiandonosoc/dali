@@ -41,7 +41,27 @@ GridDims ComputeGridDims(const SpriteGrid& grid, i32 tex_w, i32 tex_h) {
 
 }  // namespace spritesheet_asset_private
 
-i32 SpriteTextureRef::FrameCount() const {
+bool SpriteClip::Resolve(AssetRegistry& registry) {
+    _Resolved = registry.FindTexture(Texture);
+    _Handle = 0;
+    _CellSize = {};
+    _Frames.Clear();
+    if (!_Resolved) {
+        return false;
+    }
+
+    _Handle = _Resolved->Resource.Handle;
+    _CellSize = Vec2{(float)Grid.CellW, (float)Grid.CellH};
+    for (i32 cell : Frames) {
+        if (_Frames.IsFull()) {
+            break;
+        }
+        _Frames.Push(CellRect(cell));
+    }
+    return true;
+}
+
+i32 SpriteClip::CellCount() const {
     using namespace spritesheet_asset_private;
 
     if (!_Resolved) {
@@ -52,14 +72,14 @@ i32 SpriteTextureRef::FrameCount() const {
     return dims.Cols * dims.Rows;
 }
 
-SpriteTextureRef::FrameUV SpriteTextureRef::FrameRect(i32 frame) const {
+FrameUv SpriteClip::CellRect(i32 cell) const {
     using namespace spritesheet_asset_private;
 
-    FrameUV uv = {};
+    FrameUv uv = {};
     if (!_Resolved) {
         return uv;
     }
-    if (frame < 0) {
+    if (cell < 0) {
         return uv;
     }
     const kdk::Texture& res = _Resolved->Resource;
@@ -68,14 +88,11 @@ SpriteTextureRef::FrameUV SpriteTextureRef::FrameRect(i32 frame) const {
         return uv;
     }
 
-    i32 col = frame % dims.Cols;
-    i32 row = frame / dims.Cols;
+    i32 col = cell % dims.Cols;
+    i32 row = cell / dims.Cols;
     i32 x = Grid.Margin + col * (Grid.CellW + Grid.Spacing);
     i32 y = Grid.Margin + row * (Grid.CellH + Grid.Spacing);
 
-    uv.Handle = res.Handle;
-    uv.Width = Grid.CellW;
-    uv.Height = Grid.CellH;
     uv.Uv0 = Vec2{(float)x / (float)res.Width, (float)y / (float)res.Height};
     uv.Uv1 = Vec2{(float)(x + Grid.CellW) / (float)res.Width, (float)(y + Grid.CellH) / (float)res.Height};
     return uv;
@@ -95,7 +112,7 @@ i32 SpriteClip::At(float time, float fps, bool loop) const {
     } else if (step >= count) {
         step = count - 1;
     }
-    return Frames[step];
+    return step;
 }
 
 bool SpritesheetAsset::Create(AssetId id) {
@@ -149,23 +166,6 @@ std::optional<SpritesheetAsset> SpritesheetAsset::LoadFromDisk(AssetId id) {
     sheet.Manifest.Id = id;
     sheet.Manifest.HasPayload = false;
 
-    if (YAML::Node textures = node["textures"]) {
-        for (const auto& tex_node : textures) {
-            if (sheet.Textures.IsFull()) {
-                break;
-            }
-            SpriteTextureRef ref = {};
-            ref.Texture = AssetId::Normalize(StringView(tex_node["texture"].as<std::string>("").c_str()));
-            if (YAML::Node grid = tex_node["grid"]) {
-                ref.Grid.CellW = grid["cell_w"].as<int>(0);
-                ref.Grid.CellH = grid["cell_h"].as<int>(0);
-                ref.Grid.Margin = grid["margin"].as<int>(0);
-                ref.Grid.Spacing = grid["spacing"].as<int>(0);
-            }
-            sheet.Textures.Push(ref);
-        }
-    }
-
     if (YAML::Node clips = node["clips"]) {
         for (const auto& clip_node : clips) {
             if (sheet.Clips.IsFull()) {
@@ -174,6 +174,12 @@ std::optional<SpritesheetAsset> SpritesheetAsset::LoadFromDisk(AssetId id) {
             SpriteClip clip = {};
             clip.Name = StringView(clip_node["name"].as<std::string>("").c_str());
             clip.Texture = AssetId::Normalize(StringView(clip_node["texture"].as<std::string>("").c_str()));
+            if (YAML::Node grid = clip_node["grid"]) {
+                clip.Grid.CellW = grid["cell_w"].as<int>(0);
+                clip.Grid.CellH = grid["cell_h"].as<int>(0);
+                clip.Grid.Margin = grid["margin"].as<int>(0);
+                clip.Grid.Spacing = grid["spacing"].as<int>(0);
+            }
             if (YAML::Node frames = clip_node["frames"]) {
                 for (const auto& frame_node : frames) {
                     if (clip.Frames.IsFull()) {
@@ -201,25 +207,17 @@ bool SpritesheetAsset::SaveManifest() const {
     emit << YAML::Key << "version" << YAML::Value << kVersion;
     emit << YAML::Key << "id" << YAML::Value << Manifest.Id.Value.Str();
 
-    emit << YAML::Key << "textures" << YAML::Value << YAML::BeginSeq;
-    for (const SpriteTextureRef& ref : Textures) {
-        emit << YAML::Flow << YAML::BeginMap;
-        emit << YAML::Key << "texture" << YAML::Value << ref.Texture.Value.Str();
-        emit << YAML::Key << "grid" << YAML::Value << YAML::Flow << YAML::BeginMap;
-        emit << YAML::Key << "cell_w" << YAML::Value << ref.Grid.CellW;
-        emit << YAML::Key << "cell_h" << YAML::Value << ref.Grid.CellH;
-        emit << YAML::Key << "margin" << YAML::Value << ref.Grid.Margin;
-        emit << YAML::Key << "spacing" << YAML::Value << ref.Grid.Spacing;
-        emit << YAML::EndMap;
-        emit << YAML::EndMap;
-    }
-    emit << YAML::EndSeq;
-
     emit << YAML::Key << "clips" << YAML::Value << YAML::BeginSeq;
     for (const SpriteClip& clip : Clips) {
-        emit << YAML::Flow << YAML::BeginMap;
+        emit << YAML::BeginMap;
         emit << YAML::Key << "name" << YAML::Value << clip.Name.Str();
         emit << YAML::Key << "texture" << YAML::Value << clip.Texture.Value.Str();
+        emit << YAML::Key << "grid" << YAML::Value << YAML::Flow << YAML::BeginMap;
+        emit << YAML::Key << "cell_w" << YAML::Value << clip.Grid.CellW;
+        emit << YAML::Key << "cell_h" << YAML::Value << clip.Grid.CellH;
+        emit << YAML::Key << "margin" << YAML::Value << clip.Grid.Margin;
+        emit << YAML::Key << "spacing" << YAML::Value << clip.Grid.Spacing;
+        emit << YAML::EndMap;
         emit << YAML::Key << "frames" << YAML::Value << YAML::Flow << YAML::BeginSeq;
         for (i32 frame : clip.Frames) {
             emit << frame;
@@ -239,25 +237,16 @@ bool SpritesheetAsset::SaveManifest() const {
 
 bool SpritesheetAsset::ResolveReferences(AssetRegistry& registry) {
     bool all_resolved = true;
-    for (SpriteTextureRef& ref : Textures) {
-        ref._Resolved = registry.FindTexture(ref.Texture);
-        if (!ref._Resolved) {
-            LogError("Spritesheet '%s' references missing texture '%s'",
+    for (SpriteClip& clip : Clips) {
+        if (!clip.Resolve(registry)) {
+            LogError("Spritesheet '%s' clip '%s' references missing texture '%s'",
                      Manifest.Id.Value.Str(),
-                     ref.Texture.Value.Str());
+                     clip.Name.Str(),
+                     clip.Texture.Value.Str());
             all_resolved = false;
         }
     }
     return all_resolved;
-}
-
-const SpriteTextureRef* SpritesheetAsset::FindTextureRef(AssetId texture) const {
-    for (const SpriteTextureRef& ref : Textures) {
-        if (ref.Texture == texture) {
-            return &ref;
-        }
-    }
-    return nullptr;
 }
 
 const SpriteClip* SpritesheetAsset::FindClip(StringView name) const {

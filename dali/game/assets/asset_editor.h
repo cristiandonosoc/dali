@@ -41,8 +41,7 @@ struct AssetEditor {
     // Enemy creation form scratch: the short id (root prepended on create); stats edited in the
     // inspector.
     char NewEnemyId[128] = "goblin";
-    // Inspector scratch: which ref to preview, and the new-clip form.
-    AssetId SelectedRef = {};
+    // New-clip form scratch (a clip carries its own texture + grid; both edited in the inspector).
     char NewClipName[64] = "";
     AssetId NewClipTexture = {};
 
@@ -56,7 +55,6 @@ struct AssetEditor {
     // Inspector state (shared across tabs; interpreted against the current type's holder).
     AssetId Selected = {};
     float PreviewZoom = 4.0f;
-    i32 PreviewFrame = 0;  // Spritesheet inspector: the frame highlighted in the grid overlay.
 
     void Draw(AssetRegistry* registry);
     void DrawDatabaseTab(AssetRegistry* registry);

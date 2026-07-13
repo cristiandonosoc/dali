@@ -66,7 +66,7 @@ bool ParseColorHex(StringView s, Color32* out) {
 // The InstanceData block serializes as a named sub-map ("instance:"), mirroring the struct nesting
 // the same way SpriteGrid serializes as "grid:". Emit and parse live together so the schema is one
 // place.
-void EmitInstanceData(YAML::Emitter& emit, const InstanceData& data) {
+void EmitInstanceData(YAML::Emitter& emit, const EnemyAsset::InstanceData& data) {
     emit << YAML::Key << "instance" << YAML::Value << YAML::BeginMap;
     emit << YAML::Key << "speed" << YAML::Value << data.Speed;
     emit << YAML::Key << "max_health" << YAML::Value << data.MaxHealth;
@@ -84,8 +84,8 @@ void EmitInstanceData(YAML::Emitter& emit, const InstanceData& data) {
     emit << YAML::EndMap;
 }
 
-InstanceData ParseInstanceData(const YAML::Node& node) {
-    InstanceData data = {};  // defaults stand in for any missing field
+EnemyAsset::InstanceData ParseInstanceData(const YAML::Node& node) {
+    EnemyAsset::InstanceData data = {};  // defaults stand in for any missing field
     YAML::Node inst = node["instance"];
     if (!inst) {
         return data;

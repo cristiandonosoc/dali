@@ -93,9 +93,9 @@ struct Enemy {
     float Health = 0.0f;
     // Stats snapshotted from the blueprint at spawn (speed, max health, damage, reward, color). A
     // blueprint edit does not retroactively change enemies already walking.
-    InstanceData Data = {};
+    EnemyAsset::InstanceData Data = {};
     // Which EnemyAsset stamped this. The live link back to the blueprint (a stable id, not a
-    // pointer, so it survives a re-crawl / DLL reload); the v2 sprite lookup resolves through it.
+    // pointer, so it survives a re-crawl / DLL reload);
     AssetId Blueprint = {};
 };
 
