@@ -110,6 +110,70 @@ void OpenContainingFolder(StringView path) {
     }
 }
 
+bool GetFileModTime(StringView path, i64* out_ns, DateTime* out_datetime, bool datetime_local) {
+    SDL_PathInfo info = {};
+    if (!SDL_GetPathInfo(path.Str(), &info)) {
+        return false;
+    }
+    if (out_ns) {
+        *out_ns = (i64)info.modify_time;  // SDL_Time is nanoseconds since the Unix epoch
+    }
+    if (out_datetime) {
+        SDL_DateTime dt = {};
+        if (!SDL_TimeToDateTime(info.modify_time, &dt, datetime_local)) {
+            return false;
+        }
+        out_datetime->Year = dt.year;
+        out_datetime->Month = dt.month;
+        out_datetime->Day = dt.day;
+        out_datetime->Hour = dt.hour;
+        out_datetime->Minute = dt.minute;
+        out_datetime->Second = dt.second;
+        out_datetime->UtcOffsetSeconds = dt.utc_offset;
+    }
+    return true;
+}
+
+ProcessResult RunProcess(Arena* arena, std::span<const StringView> args) {
+    ProcessResult result = {};
+    if (args.empty()) {
+        return result;
+    }
+
+    auto scratch = Arena::GetScratch();
+    Arena* scratch_arena = scratch;
+
+    // SDL wants a NULL-terminated argv of C strings. A StringView may be a non-terminated substring,
+    // so each arg is interned (copied + null-terminated) into scratch.
+    std::span<const char*> argv = scratch_arena->PushArray<const char*>(args.size() + 1);
+    for (u64 i = 0; i < args.size(); ++i) {
+        argv[i] = InternStringToArena(scratch_arena, args[i]).Str();
+    }
+    argv[args.size()] = nullptr;
+
+    SDL_Process* process = SDL_CreateProcess(argv.data(), true);  // pipe stdio so we can read stdout
+    if (!process) {
+        SDL_Log("ERROR: RunProcess '%s': %s", argv[0], SDL_GetError());
+        return result;  // Launched stays false
+    }
+    result.Launched = true;
+
+    // Blocks until the process exits, returning all of stdout in an SDL-owned buffer.
+    size_t out_size = 0;
+    int exit_code = 0;
+    void* out = SDL_ReadProcess(process, &out_size, &exit_code);
+    result.ExitCode = exit_code;
+    if (out) {
+        std::span<u8> buffer = arena->Push(out_size + 1);
+        std::memcpy(buffer.data(), out, out_size);
+        buffer[out_size] = 0;  // convenience null terminator; not counted in the size
+        result.Stdout = StringView((const char*)buffer.data(), out_size);
+        SDL_free(out);
+    }
+    SDL_DestroyProcess(process);
+    return result;
+}
+
 bool InitWindow(PlatformState* ps, StringView window_name, int window_width, int window_height) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         SDL_Log("ERROR: Initializing SDL: %s\n", SDL_GetError());
@@ -233,6 +297,8 @@ bool PlatformInit(PlatformState* ps, const PlatformInitConfig& config) {
     ps->API.GLGetProcAddress = (decltype(ps->API.GLGetProcAddress))SDL_GL_GetProcAddress;
     ps->API.OpenFileDialog = OpenFileDialog;
     ps->API.OpenContainingFolder = OpenContainingFolder;
+    ps->API.GetFileModTime = GetFileModTime;
+    ps->API.RunProcess = RunProcess;
 
     auto scratch = Arena::GetScratch();
     ps->BasePath = paths::GetBaseDir(scratch);

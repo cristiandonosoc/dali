@@ -3,10 +3,13 @@
 #include <dali/core/api.h>
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
+#include <dali/game/file.h>
 #include <dali/game/platform_state.h>
+#include <dali/game/process.h>
 
 #include <imgui.h>
 
+#include <cstdio>
 #include <cstring>
 
 namespace kdk {
@@ -116,7 +119,8 @@ void SuggestTextureId(StringView source, char* dst, u64 cap) {
     path = paths::RemoveExtension(arena, path);
     path = RemovePrefix(arena, path, "raw/"sv);  // raw is the source root, never part of an id
 
-    // Drop the first (category) directory; the id's first directory is the asset type's root.
+    // Drop the first (category) directory; the create form prepends the type root itself, so the
+    // suggestion is the short, root-relative form ("sprites/goblin/U_Walk" -> "goblin/U_Walk").
     StringView rest = path;
     for (u64 i = 0; i < path.Size; ++i) {
         if (path[i] == '/') {
@@ -125,8 +129,7 @@ void SuggestTextureId(StringView source, char* dst, u64 cap) {
         }
     }
 
-    StringView suggested = Printf(arena, "%s/%s", TextureAsset::kIdRoot.Str(), rest.Str());
-    CopyToBuffer(suggested, dst, cap);
+    CopyToBuffer(rest, dst, cap);
 }
 
 // Opens the folder containing |source| (a working-dir-relative path) in the OS file manager.
@@ -208,7 +211,7 @@ void DrawInspector(AssetEditor* editor, TextureAsset* tex) {
 // highlighted.
 void DrawTextureRefPreview(AssetEditor* editor, const SpriteTextureRef& ref) {
     if (!ref._Resolved) {
-        ImGui::TextWrapped("Texture '%s' is not resolved.", ref.Texture.Value.Str());
+        ImGui::TextWrapped("Texture '%s' is not resolved.", ShortId(EAssetType::Texture, ref.Texture).Str());
         return;
     }
     const Texture& res = ref._Resolved->Resource;
@@ -264,7 +267,8 @@ void DrawClipPlayback(AssetEditor* editor, SpritesheetAsset* sheet, SpriteClip& 
 
     const SpriteTextureRef* ref = sheet->FindTextureRef(clip.Texture);
     if (!ref) {
-        ImGui::TextWrapped("References texture '%s', not in this sheet.", clip.Texture.Value.Str());
+        ImGui::TextWrapped("References texture '%s', not in this sheet.",
+                           ShortId(EAssetType::Texture, clip.Texture).Str());
         return;
     }
     if (ImGui::Button("Fill all frames")) {
@@ -325,7 +329,7 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::Text("%s", tex.Manifest.Id.Value.Str());
+        ImGui::Text("%s", ShortId(EAssetType::Texture, tex.Manifest.Id).Str());
         ImGui::PopID();
     }
     ImGui::EndChild();
@@ -340,7 +344,7 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
             editor->SelectedRef = ref.Texture;
         }
         ImGui::SameLine();
-        ImGui::Text("%s  (%d frames)", ref.Texture.Value.Str(), ref.FrameCount());
+        ImGui::Text("%s  (%d frames)", ShortId(EAssetType::Texture, ref.Texture).Str(), ref.FrameCount());
         // Only the selected reference expands its grid controls; the rest stay one-liners.
         if (is_selected) {
             ImGui::InputInt("Cell W", &ref.Grid.CellW);
@@ -367,11 +371,13 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
 
     ImGui::InputText("Name", editor->NewClipName, sizeof(editor->NewClipName));
     const char* clip_ref_preview =
-        editor->NewClipTexture.IsValid() ? editor->NewClipTexture.Value.Str() : "(choose ref)";
+        editor->NewClipTexture.IsValid()
+            ? ShortId(EAssetType::Texture, editor->NewClipTexture).Str()
+            : "(choose ref)";
     if (ImGui::BeginCombo("Ref", clip_ref_preview)) {
         for (SpriteTextureRef& ref : sheet->Textures) {
             bool selected = ref.Texture == editor->NewClipTexture;
-            if (ImGui::Selectable(ref.Texture.Value.Str(), selected)) {
+            if (ImGui::Selectable(ShortId(EAssetType::Texture, ref.Texture).Str(), selected)) {
                 editor->NewClipTexture = ref.Texture;
             }
         }
@@ -411,7 +417,10 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
             editor->ClipTime = 0.0f;
         }
         ImGui::SameLine();
-        ImGui::Text("%s  <-  %s  [%d frames]", clip.Name.Str(), clip.Texture.Value.Str(), clip.Frames.Size);
+        ImGui::Text("%s  <-  %s  [%d frames]",
+                    clip.Name.Str(),
+                    ShortId(EAssetType::Texture, clip.Texture).Str(),
+                    clip.Frames.Size);
         // Only the selected clip expands to playback controls + remove.
         if (is_selected) {
             DrawClipPlayback(editor, sheet, clip);
@@ -430,6 +439,197 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
 }  // namespace asset_editor_private
 
 namespace asset_editor_private {
+
+// The manifest of the asset with |id|, found across every holder (ids are unique across types).
+// nullptr if no loaded asset has that id. The per-holder scan is the same friction a generic
+// asset-type table would collapse; fine at three types.
+const AssetManifest* FindManifest(AssetRegistry* registry, AssetId id) {
+    if (TextureAsset* tex = registry->FindTexture(id)) {
+        return &tex->Manifest;
+    }
+    if (SpritesheetAsset* sheet = registry->FindSpritesheet(id)) {
+        return &sheet->Manifest;
+    }
+    if (EnemyAsset* enemy = registry->FindEnemyBlueprint(id)) {
+        return &enemy->Manifest;
+    }
+    return nullptr;
+}
+
+// The Database detail pane: the common manifest fields, plus the manifest file's last-modified time
+// (queried live from disk, UTC).
+void DrawAssetMetadata(const AssetManifest* manifest) {
+    ImGui::Text("Type:    %s", ToString(manifest->Type).Str());
+    ImGui::Text("Id:      %s", manifest->Id.Value.Str());
+    ImGui::Text("Version: %d", manifest->Version);
+    if (!manifest->Source.IsEmpty()) {
+        ImGui::Text("Source:  %s", manifest->Source.Str());
+    }
+    ImGui::Text("Payload: %s", manifest->HasPayload ? "yes" : "no");
+
+    ImGui::Separator();
+
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+    StringView yml_path = AssetYmlPath(arena, manifest->Id);
+    ImGui::TextDisabled("%s", yml_path.Str());
+
+    DateTime dt = {};
+    if (GetFileModTime(yml_path, nullptr, &dt)) {  // nullptr: only the calendar date, in local time
+        StringView offset_label = "UTC"sv;
+        if (dt.UtcOffsetSeconds != 0) {
+            char sign = dt.UtcOffsetSeconds > 0 ? '+' : '-';
+            i32 abs_seconds = dt.UtcOffsetSeconds < 0 ? -dt.UtcOffsetSeconds : dt.UtcOffsetSeconds;
+            offset_label = Printf(arena, "UTC%c%02d:%02d", sign, abs_seconds / 3600, (abs_seconds % 3600) / 60);
+        }
+        ImGui::Text("Last modified: %04d-%02d-%02d %02d:%02d:%02d %s",
+                    dt.Year,
+                    dt.Month,
+                    dt.Day,
+                    dt.Hour,
+                    dt.Minute,
+                    dt.Second,
+                    offset_label.Str());
+    } else {
+        ImGui::Text("Last modified: unknown");
+    }
+}
+
+// Whether |id| is in the last verify's dirty set (linear scan; the set is small).
+bool IsGitDirty(const AssetEditor* editor, AssetId id) {
+    for (const AssetId& dirty : editor->GitDirtyIds) {
+        if (dirty == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Turns one `git status --porcelain` line ("XY <path>") into the asset it belongs to and records it
+// in |dirty|. The path is repo-relative ("assets/textures/goblin/walk.yml"); AssetId::Normalize
+// strips the assets/ prefix and the extension, so a dirty .yml and .asset land on the same id. Lines
+// that don't map to an asset (or duplicates) are ignored.
+void CollectDirtyFromLine(StringView line, FixedVector<AssetId, AssetEditor::kMaxDirtyAssets>* dirty) {
+    if (line.Size > 0) {
+        if (line[line.Size - 1] == '\r') {
+            line = StringView(line.Str(), line.Size - 1);  // strip CR of a CRLF
+        }
+    }
+    if (line.Size < 4) {  // "XY p" is the shortest meaningful line
+        return;
+    }
+
+    // Porcelain v1: two status chars, a space, then the path. Renames read "orig -> new"; take new.
+    StringView path = StringView(line.Str() + 3, line.Size - 3);
+    for (u64 i = 0; i + 4 <= path.Size; ++i) {
+        bool arrow = path[i] == ' ';
+        arrow &= path[i + 1] == '-';
+        arrow &= path[i + 2] == '>';
+        arrow &= path[i + 3] == ' ';
+        if (arrow) {
+            path = StringView(path.Str() + i + 4, path.Size - i - 4);
+            break;
+        }
+    }
+
+    AssetId id = AssetId::Normalize(path);
+    if (id.Value.ToString().IsEmpty()) {
+        return;
+    }
+    for (const AssetId& existing : *dirty) {  // dedupe (the .yml and .asset both land here)
+        if (existing == id) {
+            return;
+        }
+    }
+    if (!dirty->IsFull()) {
+        dirty->Push(id);
+    }
+}
+
+// One global `git status --porcelain -- assets`, mapping every dirty path back to its asset id. One
+// spawn covers the whole tree - never per-asset, never per-frame. Cached on |editor|.
+void RunGitVerifyAll(AssetEditor* editor) {
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+
+    StringView repo = ForwardSlashes(arena, paths::GetBaseDir(arena));
+    // -C sets git's directory (the contract has no cwd param); the pathspec scopes it to assets/.
+    StringView args[] = {
+        "git"sv, "-C"sv, repo, "status"sv, "--porcelain"sv, "--"sv, "assets"sv,
+    };
+    ProcessResult result = RunProcess(arena, std::span<const StringView>(args));
+
+    editor->GitChecked = true;
+    editor->GitLaunched = result.Launched;
+    editor->GitExitCode = result.ExitCode;
+    editor->GitDirtyIds.Clear();
+    if (!result.Launched) {
+        return;
+    }
+    if (result.ExitCode != 0) {
+        return;
+    }
+
+    StringView out = result.Stdout;
+    u64 start = 0;
+    for (u64 i = 0; i <= out.Size; ++i) {
+        bool cut = (i == out.Size);
+        if (!cut) {
+            cut = (out[i] == '\n');
+        }
+        if (!cut) {
+            continue;
+        }
+        CollectDirtyFromLine(StringView(out.Str() + start, i - start), &editor->GitDirtyIds);
+        start = i + 1;
+    }
+}
+
+// The Database detail pane's git line: the selected asset's state per the last global verify.
+void DrawGitStatus(const AssetEditor* editor, const AssetManifest* manifest) {
+    ImGui::Separator();
+    if (!editor->GitChecked) {
+        ImGui::TextDisabled("Git: press \"Verify all\" above");
+        return;
+    }
+    if (!editor->GitLaunched) {
+        ImGui::TextDisabled("Git: unavailable");
+        return;
+    }
+    if (editor->GitExitCode != 0) {
+        ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.2f, 1.0f), "Git: error (exit %d)", editor->GitExitCode);
+        return;
+    }
+    if (IsGitDirty(editor, manifest->Id)) {
+        ImGui::TextColored(ImVec4(0.95f, 0.85f, 0.3f, 1.0f), "Git: Modified");
+    } else {
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Git: Clean");
+    }
+}
+
+// One Database list row: dirty rows (per the last verify) are marked "* " and coloured. Selection
+// keys on the full id; PushID keeps rows distinct when two types share a short id (e.g. "goblin").
+void DrawDatabaseRow(AssetEditor* editor, EAssetType type, AssetId id) {
+    ImGui::PushID(id.Value.Str());
+
+    bool dirty = editor->GitChecked;
+    dirty &= IsGitDirty(editor, id);
+
+    char label[160];
+    snprintf(label, sizeof(label), "%s%s", dirty ? "* " : "", ShortId(type, id).Str());
+
+    if (dirty) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.85f, 0.3f, 1.0f));
+    }
+    bool selected = (id == editor->DatabaseSelected);
+    if (ImGui::Selectable(label, selected)) {
+        editor->DatabaseSelected = id;
+    }
+    if (dirty) {
+        ImGui::PopStyleColor();
+    }
+    ImGui::PopID();
+}
 
 // The enemy inspector: edits the blueprint's InstanceData in place, then Save writes the manifest.
 // No preview machinery in v1 — the color swatch is the whole visual.
@@ -465,6 +665,10 @@ void DrawEnemyInspector(EnemyAsset* enemy) {
 }  // namespace asset_editor_private
 
 void AssetEditor::Draw(AssetRegistry* registry) {
+    if (ShowDatabase) {
+        DrawDatabaseTab(registry);
+        return;
+    }
     switch (CurrentType) {
         case EAssetType::Texture: {
             DrawTextureTab(registry);
@@ -482,6 +686,60 @@ void AssetEditor::Draw(AssetRegistry* registry) {
             break;
         }
     }
+}
+
+void AssetEditor::DrawDatabaseTab(AssetRegistry* registry) {
+    using namespace asset_editor_private;
+
+    ImGui::SeparatorText("Asset Database");
+    if (ImGui::Button("Rescan assets/")) {
+        registry->CrawlAndLoad();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Verify all (git)")) {
+        RunGitVerifyAll(this);
+    }
+    bool show_count = GitChecked;
+    show_count &= GitLaunched;
+    show_count &= (GitExitCode == 0);
+    if (show_count) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("modified: %d", GitDirtyIds.Size);
+    }
+    ImGui::Separator();
+
+    // List pane, grouped by type. Selecting a row records its id; the detail pane resolves it.
+    ImGui::BeginChild("db_list", ImVec2(300.0f, 0.0f), ImGuiChildFlags_Borders);
+
+    // Rows show the short (root-relative) id since the group already names the type.
+    ImGui::SeparatorText("Textures");
+    for (TextureAsset& tex : registry->Textures) {
+        DrawDatabaseRow(this, EAssetType::Texture, tex.Manifest.Id);
+    }
+
+    ImGui::SeparatorText("Spritesheets");
+    for (SpritesheetAsset& sheet : registry->Spritesheets) {
+        DrawDatabaseRow(this, EAssetType::Spritesheet, sheet.Manifest.Id);
+    }
+
+    ImGui::SeparatorText("Enemies");
+    for (EnemyAsset& enemy : registry->EnemyBlueprints) {
+        DrawDatabaseRow(this, EAssetType::Enemy, enemy.Manifest.Id);
+    }
+
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    // Detail pane: the selected asset's metadata + last-modified time.
+    ImGui::BeginChild("db_detail", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+    if (const AssetManifest* manifest = FindManifest(registry, DatabaseSelected)) {
+        DrawAssetMetadata(manifest);
+        DrawGitStatus(this, manifest);
+    } else {
+        ImGui::TextWrapped("Select an asset to see its metadata.");
+    }
+    ImGui::EndChild();
 }
 
 void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
@@ -502,8 +760,9 @@ void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
     }
     ImGui::InputText("Output id", NewId, sizeof(NewId));
 
-    // Show the canonical id the create will actually use.
-    AssetId normalized = AssetId::Normalize(StringView(NewId));
+    // The field is root-relative; the tab's type supplies the root. The preview shows the full
+    // canonical id the create will actually use.
+    AssetId normalized = AssetIdFromShort(EAssetType::Texture, StringView(NewId));
     ImGui::TextDisabled("-> %s", normalized.Value.Str());
 
     ImGui::Checkbox("Flip vertically", &NewFlip);
@@ -529,7 +788,7 @@ void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
     ImGui::TextDisabled("Textures (%d)", registry->Textures.Size);
     for (TextureAsset& tex : registry->Textures) {
         bool selected = (tex.Manifest.Id == Selected);
-        if (ImGui::Selectable(tex.Manifest.Id.Value.Str(), selected)) {
+        if (ImGui::Selectable(ShortId(EAssetType::Texture, tex.Manifest.Id).Str(), selected)) {
             Selected = tex.Manifest.Id;
         }
     }
@@ -555,7 +814,7 @@ void AssetEditor::DrawSpritesheetTab(AssetRegistry* registry) {
     ImGui::SeparatorText("Create Spritesheet");
 
     ImGui::InputText("Output id", NewSheetId, sizeof(NewSheetId));
-    AssetId normalized = AssetId::Normalize(StringView(NewSheetId));
+    AssetId normalized = AssetIdFromShort(EAssetType::Spritesheet, StringView(NewSheetId));
     ImGui::TextDisabled("-> %s", normalized.Value.Str());
 
     if (ImGui::Button("Create")) {
@@ -577,7 +836,7 @@ void AssetEditor::DrawSpritesheetTab(AssetRegistry* registry) {
     ImGui::TextDisabled("Spritesheets (%d)", registry->Spritesheets.Size);
     for (SpritesheetAsset& sheet : registry->Spritesheets) {
         bool selected = (sheet.Manifest.Id == Selected);
-        if (ImGui::Selectable(sheet.Manifest.Id.Value.Str(), selected)) {
+        if (ImGui::Selectable(ShortId(EAssetType::Spritesheet, sheet.Manifest.Id).Str(), selected)) {
             Selected = sheet.Manifest.Id;
         }
     }
@@ -602,7 +861,7 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
     ImGui::SeparatorText("Create Enemy");
 
     ImGui::InputText("Output id", NewEnemyId, sizeof(NewEnemyId));
-    AssetId normalized = AssetId::Normalize(StringView(NewEnemyId));
+    AssetId normalized = AssetIdFromShort(EAssetType::Enemy, StringView(NewEnemyId));
     ImGui::TextDisabled("-> %s", normalized.Value.Str());
 
     if (ImGui::Button("Create")) {
@@ -623,7 +882,7 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
     ImGui::TextDisabled("Enemies (%d)", registry->EnemyBlueprints.Size);
     for (EnemyAsset& enemy : registry->EnemyBlueprints) {
         bool selected = (enemy.Manifest.Id == Selected);
-        if (ImGui::Selectable(enemy.Manifest.Id.Value.Str(), selected)) {
+        if (ImGui::Selectable(ShortId(EAssetType::Enemy, enemy.Manifest.Id).Str(), selected)) {
             Selected = enemy.Manifest.Id;
         }
     }

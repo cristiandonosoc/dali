@@ -20,4 +20,12 @@ bool WriteFile(StringView path, std::span<const u8> data) {
     return ps->API.WriteFile(path, data);
 }
 
+bool GetFileModTime(StringView path, i64* out_ns, DateTime* out_datetime, bool datetime_local) {
+    PlatformState* ps = GetGlobalPlatformState();
+    if (!ps || !ps->API.GetFileModTime) {
+        return false;
+    }
+    return ps->API.GetFileModTime(path, out_ns, out_datetime, datetime_local);
+}
+
 }  // namespace kdk

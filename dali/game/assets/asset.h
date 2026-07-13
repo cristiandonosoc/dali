@@ -17,6 +17,11 @@ enum class EAssetType : u8 {
 StringView ToString(EAssetType type);
 EAssetType AssetTypeFromString(StringView str);
 
+// The id root for an asset type ("textures", "spritesheets", "enemies"), empty for Invalid/COUNT.
+// Same value each type declares as its kIdRoot, but keyed by the enum so display/entry code can map
+// a type to its root without the concrete struct. (Keep in sync with the structs' kIdRoot.)
+StringView IdRootForType(EAssetType type);
+
 // A canonical asset identifier: lowercase, no spaces, forward-slash separated, no extension, rooted
 // at the assets/ directory (e.g. "textures/goblin/walk"). It is the reference string, the registry
 // key, and the on-disk stem all at once. Stored inline (FixedString) so the registry is a
@@ -33,6 +38,17 @@ struct AssetId {
     bool IsValid() const;
     bool operator==(const AssetId& other) const = default;
 };
+
+// The id with its type root stripped, for display in type-contextual UI where the root is redundant
+// ("textures/goblin/walk" -> "goblin/walk"). Returned as a view into |id|'s own storage (so it stays
+// null-terminated); the full id, not this, remains the stored/keyed/referenced identity. If |id| is
+// not under the type's root, it is returned unchanged.
+StringView ShortId(EAssetType type, const AssetId& id);
+
+// The inverse, for entry: builds a full canonical AssetId from a root-relative |short_id| typed in a
+// type-contextual form, prepending the type root. Tolerant of an already-full input (an input that
+// already starts with the root is not doubled), so pasting a full id still works.
+AssetId AssetIdFromShort(EAssetType type, StringView short_id);
 
 // The header every asset manifest (.yml) carries, regardless of type.
 struct AssetManifest {

@@ -43,6 +43,26 @@ struct FileDialogFilter {
     const char* Extensions = nullptr;
 };
 
+// A wall-clock timestamp broken into calendar fields, plus the zone offset it was rendered in
+// (self-describing, so display can label it and a failed offset can't be mistaken for UTC). The
+// platform fills this from a raw timestamp; it is the only structured time in the contract.
+struct DateTime {
+    i32 Year = 0;
+    i32 Month = 0;   // 1-12
+    i32 Day = 0;     // 1-31
+    i32 Hour = 0;    // 0-23
+    i32 Minute = 0;  // 0-59
+    i32 Second = 0;  // 0-59
+    i32 UtcOffsetSeconds = 0;  // seconds east of UTC (0 == UTC); DST-correct for this instant
+};
+
+// The outcome of a synchronous subprocess run (see PlatformAPI::RunProcess).
+struct ProcessResult {
+    bool Launched = false;   // whether the process actually started (false == spawn failed)
+    i32 ExitCode = 0;        // the process's exit code; meaningful only when Launched
+    StringView Stdout = {};  // captured stdout, interned into the caller's arena (may be empty)
+};
+
 // Services the platform provides to the game. Plain function pointers (not virtuals): the struct is
 // a POD filled in by the platform, so it crosses the DLL boundary with no vtable coupling and a
 // reload never invalidates it.
@@ -71,6 +91,27 @@ struct PlatformAPI {
     // Opens |path| in the OS file manager. If |path| is a file, opens its containing directory
     // instead. |path| should be absolute. No-op on failure.
     void (*OpenContainingFolder)(StringView path) = nullptr;
+
+    // Queries |path|'s last-modified time. The raw number is the primitive; the calendar breakdown
+    // is an optional convenience the platform fills (only it has the timezone rules).
+    //   |out_ns|       - if non-null, filled with nanoseconds since the Unix epoch (SDL_Time).
+    //   |out_datetime| - if non-null, filled with the broken-down date (see |datetime_local|).
+    //   |datetime_local| - true breaks |out_datetime| into local wall clock (DST-correct for that
+    //                      instant); false into UTC. Ignored when |out_datetime| is null.
+    // false if the path does not exist or cannot be queried (out-params left untouched). No default
+    // args here: they are illegal on a pointer-to-function; the game-side wrapper (file.h) supplies
+    // them.
+    bool (*GetFileModTime)(StringView path,
+                           i64* out_ns,
+                           DateTime* out_datetime,
+                           bool datetime_local) = nullptr;
+
+    // Runs |args| synchronously (argv[0] is the executable, resolved on PATH), blocking until it
+    // exits, and captures its stdout into |arena|. Injection-safe: args are a vector, never a shell
+    // string. No working-directory parameter (the SDL process API has none) - pass a tool-specific
+    // flag such as `git -C <dir>`. Spawning a process is far costlier than a file op, so callers
+    // must run it on-demand / cache the result, never per-frame. Editor tooling only in practice.
+    ProcessResult (*RunProcess)(Arena* arena, std::span<const StringView> args) = nullptr;
 };
 
 // Host-owned memory. Lives in the platform exe, so it survives DLL reloads untouched.

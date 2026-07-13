@@ -965,6 +965,10 @@ void DrawAssetTypeBar(GameState* gs, float menu_bar_height) {
                              ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
     ImGui::Begin("##AssetTypeBar", nullptr, flags);
     if (ImGui::BeginMenuBar()) {
+        // The type-agnostic overview comes first and is the landing pane.
+        if (ImGui::MenuItem("Database", nullptr, gs->AssetEditor.ShowDatabase)) {
+            gs->AssetEditor.ShowDatabase = true;
+        }
         for (i32 t = (i32)EAssetType::Texture; t < (i32)EAssetType::COUNT; ++t) {
             EAssetType type = (EAssetType)t;
             // Menu label = the type token with a capitalized first letter ("texture" -> "Texture").
@@ -973,8 +977,10 @@ void DrawAssetTypeBar(GameState* gs, float menu_bar_height) {
             if (label[0] >= 'a' && label[0] <= 'z') {
                 label[0] = (char)(label[0] - 'a' + 'A');
             }
-            bool is_selected = gs->AssetEditor.CurrentType == type;
+            bool is_selected = !gs->AssetEditor.ShowDatabase;
+            is_selected &= (gs->AssetEditor.CurrentType == type);
             if (ImGui::MenuItem(label, nullptr, is_selected)) {
+                gs->AssetEditor.ShowDatabase = false;
                 gs->AssetEditor.CurrentType = type;
             }
         }
