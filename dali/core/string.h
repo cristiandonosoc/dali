@@ -86,21 +86,22 @@ struct FixedString {
     }
 
     StringView ToString() const { return StringView(_Chars.DataPtr(), Size); }
+    operator StringView() const { return ToString(); }
     const char* Str() const { return &_Chars[0]; }
     char* StrMutable() { return &_Chars[0]; }
 
     bool IsEmpty() const { return Size == 0; }
 
     bool operator==(const FixedString<CAPACITY>& other) const { return Equals(other.ToString()); }
-    bool Equals(const StringView& other) const {
-        StringView _this = ToString();
+    bool Equals(const struct StringView& other) const {
+        struct StringView _this = ToString();
         return _this.Equals(other);
     }
 
     template <u64 OTHER_CAPACITY>
     bool operator<(const FixedString<OTHER_CAPACITY>& other) const {
-        StringView this_str = ToString();
-        StringView other_str = other.ToString();
+        struct StringView this_str = ToString();
+        struct StringView other_str = other.ToString();
         return std::strcmp(this_str.Str(), other_str.Str()) < 0;
     }
 };

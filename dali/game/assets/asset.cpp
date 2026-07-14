@@ -54,7 +54,7 @@ StringView ToString(EAssetType type) {
     switch (type) {
         case EAssetType::Invalid: return "invalid"sv;
         case EAssetType::Texture: return "texture"sv;
-        case EAssetType::Spritesheet: return "spritesheet"sv;
+        case EAssetType::SpriteSheet: return "spritesheet"sv;
         case EAssetType::Enemy: return "enemy"sv;
         case EAssetType::COUNT: break;
     }
@@ -67,7 +67,7 @@ EAssetType AssetTypeFromString(StringView str) {
         return EAssetType::Texture;
     }
     if (str == "spritesheet"sv) {
-        return EAssetType::Spritesheet;
+        return EAssetType::SpriteSheet;
     }
     if (str == "enemy"sv) {
         return EAssetType::Enemy;
@@ -80,7 +80,7 @@ StringView IdRootForType(EAssetType type) {
     // it must not depend on the concrete asset headers. Mirror any kIdRoot change here.
     switch (type) {
         case EAssetType::Texture: return "textures"sv;
-        case EAssetType::Spritesheet: return "spritesheets"sv;
+        case EAssetType::SpriteSheet: return "spritesheets"sv;
         case EAssetType::Enemy: return "enemies"sv;
         case EAssetType::Invalid:
         case EAssetType::COUNT: break;

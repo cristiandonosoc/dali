@@ -96,9 +96,11 @@ struct DrawContext {
     ImDrawList* DrawList;
     Vec2 Origin;
     float Zoom = 1;
+    float Time = 0;
+    AssetRegistry* Registry = nullptr;  // for live-resolving asset references at draw
 
-    DrawContext(ImDrawList* draw_list, const Vec2& origin, float zoom)
-        : DrawList(draw_list), Origin(origin), Zoom(zoom) {}
+    DrawContext(ImDrawList* draw_list, const Vec2& origin, float zoom, AssetRegistry* registry)
+        : DrawList(draw_list), Origin(origin), Zoom(zoom), Registry(registry) {}
 
     ImVec2 WorldToScreen(const Vec2& p) const {
         return ImVec2(Origin.x + p.x * Zoom, Origin.y + p.y * Zoom);
@@ -144,6 +146,9 @@ void DrawArrow(DrawContext* dc,
                           3.0f);
 }
 
+ImVec2 ToImVec2(const Vec2& v) { return {v.x, v.y}; }
+Vec2 ToVec2(const ImVec2& v) { return {v.x, v.y}; }
+
 // Draws a horizontal health bar (black backdrop + colored fill) centered at |center_x| with its top
 // at |top_y|. |fraction| is clamped to [0,1]; an empty bar still shows the backdrop.
 void DrawHealthBar(DrawContext* dc,
@@ -164,8 +169,22 @@ void DrawHealthBar(DrawContext* dc,
 
 void DrawEnemy(DrawContext* dc, const Enemy& enemy) {
     ImVec2 p = dc->WorldToScreen(enemy.Position);
-    dc->DrawList->AddCircleFilled(p, 6.0f * dc->Zoom, enemy.Data.Color.Bits);
-    dc->DrawList->AddCircle(p, 6.0f * dc->Zoom, Color32::Black.Bits, 0, 1.5f);
+    // dc->DrawList->AddCircleFilled(p, 6.0f * dc->Zoom, enemy.Data.Color.Bits);
+    // dc->DrawList->AddCircle(p, 6.0f * dc->Zoom, Color32::Black.Bits, 0, 1.5f);
+
+    // Resolved live from the enemy's reference. A drawn enemy is expected to carry a valid, baked
+    // walk clip; a missing one is a data error, not a runtime-recoverable state.
+    const SpriteSheetClip* clip = enemy.Data.WalkClip.Resolve(*dc->Registry);
+    ASSERT(clip);
+    ASSERT(clip->_Resolved);
+    i32 frame = clip->At(dc->Time, clip->FPS, true);
+    ImVec2 hsize = ToImVec2((clip->_CellSize * dc->Zoom) / 2.0f);
+    FrameUv frameuv = clip->CellRect(frame);
+    dc->DrawList->AddImage(clip->_Resolved->Resource.ImGuiId(),
+                           p - hsize,
+                           p + hsize,
+                           ToImVec2(frameuv.Uv0),
+                           ToImVec2(frameuv.Uv1));
 
     // Health bar, only once the enemy has taken damage (a full bar would just be clutter).
     if (enemy.Data.MaxHealth > 0.0f && enemy.Health < enemy.Data.MaxHealth) {
@@ -207,7 +226,11 @@ void DrawTileContent(DrawContext* dc, const Tile& tile, const Hex& hovered) {
 // highlighted, which also proves the world<->hex transform round-trips.
 //
 // Returns clicked hex.
-std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, float zoom) {
+std::optional<Hex> DrawHexGrid(PlatformState* ps,
+                               World* world,
+                               AssetRegistry* registry,
+                               Vec2 camera,
+                               float zoom) {
     std::optional<Hex> result = {};
 
     ImGuiIO& io = ImGui::GetIO();
@@ -217,7 +240,8 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps, World* world, Vec2 camera, flo
                 io.DisplaySize.y * 0.5f + camera.y);
 
     ImDrawList* _draw_list = ImGui::GetBackgroundDrawList();
-    DrawContext dc(_draw_list, origin, zoom);
+    DrawContext dc(_draw_list, origin, zoom, registry);
+    dc.Time = ps->TimeTracking.TotalSeconds;
 
     // // World->screen: the sim is in zoom-independent world units; pixels are origin + world *
     // zoom. auto world_to_screen = [&](Vec2 w) -> ImVec2 {
@@ -443,8 +467,8 @@ void World::SpawnEnemy(const EnemyAsset& blueprint, Hex at, float health_scale) 
     enemy.Id = NextEnemyId;
     NextEnemyId++;
     enemy.Position = Hex::HexToWorld(kHexSize, at);
-    enemy.Target = at;            // retargets to the next flow-field tile on the first update
-    enemy.Data = blueprint.Data;  // snapshot the stats; the blueprint is not retained
+    enemy.Target = at;  // retargets to the next flow-field tile on the first update
+    enemy.Data = blueprint.PerInstanceData;  // snapshot the stats; the blueprint is not retained
     enemy.Data.MaxHealth *= health_scale;
     enemy.Health = enemy.Data.MaxHealth;
     enemy.Blueprint = blueprint.Manifest.Id;
@@ -1019,7 +1043,7 @@ void GameRender(PlatformState* ps, GameState* gs) {
         return;
     }
 
-    std::optional<Hex> clicked_hex = DrawHexGrid(ps, &world, gs->Camera, gs->Zoom);
+    std::optional<Hex> clicked_hex = DrawHexGrid(ps, &world, &gs->Registry, gs->Camera, gs->Zoom);
     if (clicked_hex.has_value()) {
         switch (gs->Phase) {
             case EGamePhase::PreGame: {

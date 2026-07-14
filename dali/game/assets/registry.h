@@ -8,18 +8,17 @@
 namespace kdk {
 
 // The loaded set of assets. Lives by value inside GameState (in the platform-owned PermanentArena),
-// so it is a self-contained value blob that survives DLL reloads untouched. TODO(perf): linear
-// lookups and one holder per type; a generic X-macro table can come once there are enough types.
+// so it is a self-contained value blob that survives DLL reloads untouched.
+// TODO(cdc): linear lookups and one holder per type.
+//			  A generic X-macro table can come once there are enough types.
 struct AssetRegistry {
-    static constexpr i32 kMaxTextures = 256;
-    static constexpr i32 kMaxSpritesheets = 256;
-    static constexpr i32 kMaxEnemyBlueprints = 256;
+    static constexpr i32 kMaxTextureAssets = 256;
+    static constexpr i32 kMaxSpriteSheetAssets = 256;
+    static constexpr i32 kMaxEnemyAssets = 256;
 
-    FixedVector<TextureAsset, kMaxTextures> Textures = {};
-    FixedVector<SpritesheetAsset, kMaxSpritesheets> Spritesheets = {};
-    // Enemy blueprints (CDOs). "Blueprint" in the name keeps this distinct from World::FindEnemy,
-    // which returns a live runtime instance.
-    FixedVector<EnemyAsset, kMaxEnemyBlueprints> EnemyBlueprints = {};
+    FixedVector<TextureAsset, kMaxTextureAssets> TextureAssets = {};
+    FixedVector<SpriteSheetAsset, kMaxSpriteSheetAssets> SpriteSheetAssets = {};
+    FixedVector<EnemyAsset, kMaxEnemyAssets> EnemyAssets = {};
 
     // Destroys every loaded asset and reloads by crawling the assets/ directory, then resolves
     // cross-asset references. Call once at init; also the "Rescan" action in the editor.
@@ -31,12 +30,12 @@ struct AssetRegistry {
     // Loads (or reloads) a single asset by id from disk, replacing an existing entry with the same
     // id (freeing a texture's GPU resource first). nullptr on failure.
     TextureAsset* LoadTexture(AssetId id);
-    SpritesheetAsset* LoadSpritesheet(AssetId id);
+    SpriteSheetAsset* LoadSpriteSheet(AssetId id);
     EnemyAsset* LoadEnemyBlueprint(AssetId id);
 
     // Finds a loaded asset by id, or nullptr.
     TextureAsset* FindTexture(AssetId id);
-    SpritesheetAsset* FindSpritesheet(AssetId id);
+    SpriteSheetAsset* FindSpriteSheet(AssetId id);
     EnemyAsset* FindEnemyBlueprint(AssetId id);
 };
 

@@ -32,11 +32,12 @@ struct FrameUv {
 // sample UV rects) and the texture is linked, so drawing a frame is a direct index with no
 // per-frame math and no sibling lookup. Playback rate and looping are the caller's concern, not the
 // clip's.
-struct SpriteClip {
+struct SpriteSheetClip {
     FixedString<64> Name = {};  // "walk_down"
     AssetId Texture = {};       // "textures/goblin/walk_down"
     SpriteGrid Grid = {};
     FixedVector<i32, 64> Frames = {};  // cell indices, in playback order (serialized)
+	float FPS = 8;
 
     // Resolved / baked by Resolve(); not serialized. All frames of a clip sample the same texture,
     // so the GL handle and cell size are clip-level, not per-frame.
@@ -65,28 +66,40 @@ struct SpriteClip {
 // A spritesheet: one concept ("goblin"), assembled from the clips over its textures. Pure metadata
 // (yml-only). Each clip carries its own texture reference and grid, so the sheet is just a named
 // bag of clips.
-struct SpritesheetAsset {
-    static constexpr EAssetType kAssetType = EAssetType::Spritesheet;
+struct SpriteSheetAsset {
+    static constexpr EAssetType kAssetType = EAssetType::SpriteSheet;
     static constexpr i32 kVersion = 3;
     static constexpr StringView kIdRoot = "spritesheets"sv;
     static constexpr i32 kMaxClips = 64;
 
     AssetManifest Manifest = {};
-    FixedVector<SpriteClip, kMaxClips> Clips = {};
+    FixedVector<SpriteSheetClip, kMaxClips> Clips = {};
 
     // Writes the manifest for a new, empty sheet (no clips) — a spritesheet is created from just
     // its id; clips are added in the inspector. Overwrites any existing.
     static bool Create(AssetId id);
     // Reads the manifest at |id|. nullopt if it isn't a spritesheet or the version mismatches. Does
     // NOT resolve/bake clips (the registry does that in a second pass).
-    static std::optional<SpritesheetAsset> LoadFromDisk(AssetId id);
+    static std::optional<SpriteSheetAsset> LoadFromDisk(AssetId id);
     bool SaveManifest() const;
 
     // Resolves and bakes every clip against |registry|. Logs each clip whose texture is missing;
     // returns whether all resolved.
     bool ResolveReferences(AssetRegistry& registry);
 
-    const SpriteClip* FindClip(StringView name) const;
+    const SpriteSheetClip* FindClip(StringView name) const;
+};
+
+// A design-time pointer to one clip inside a sprite sheet, stored as ids (sheet id + clip name)
+// rather than a resolved pointer. Resolve() looks the clip up live against the registry on every
+// call, so it can never dangle across clip edits or asset reloads. TODO(cdc): cache the resolved
+// pointer once the data is known frozen, if the per-lookup cost ever shows up.
+struct SpriteSheetClipReference {
+    AssetId SpriteSheetId = {};
+    FixedString<64> ClipName = {};
+
+    // The referenced clip, looked up live. nullptr if unset, or the sheet/clip no longer exists.
+    const SpriteSheetClip* Resolve(AssetRegistry& registry) const;
 };
 
 }  // namespace kdk

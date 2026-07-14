@@ -2,8 +2,11 @@ type: enemy
 version: 1
 id: enemies/goblin
 instance:
-  speed: 214
+  speed: 25
   max_health: 10
   damage: 5
   reward: 5
   color: "35ff00ff"
+sprite:
+  sprite_sheet: spritesheets/goblin
+  clip: d_walk

@@ -198,7 +198,10 @@ void DrawInspector(AssetEditor* editor, TextureAsset* tex) {
     }
 
     ImGui::SliderFloat("Zoom", &editor->PreviewZoom, 0.5f, 16.0f, "%.1fx");
-    ImGui::BeginChild("preview", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("preview",
+                      ImVec2(0.0f, 0.0f),
+                      ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_HorizontalScrollbar);
     if (res.IsValid()) {
         ImVec2 size(res.Width * editor->PreviewZoom, res.Height * editor->PreviewZoom);
         ImGui::Image((ImTextureID)res.ImGuiId(), size);
@@ -209,9 +212,10 @@ void DrawInspector(AssetEditor* editor, TextureAsset* tex) {
 // Grid-overlay frame picker for one clip: draws the clip's texture with cell boundaries on top
 // (cells already in the clip highlighted), and appends the clicked cell to the sequence. Returns
 // whether a cell was added this frame (the caller re-resolves so the baked frames stay current).
-bool DrawClipFramePicker(AssetEditor* editor, SpriteClip& clip) {
+bool DrawClipFramePicker(AssetEditor* editor, SpriteSheetClip& clip) {
     if (!clip._Resolved) {
-        ImGui::TextWrapped("Texture '%s' is not resolved.", ShortId(EAssetType::Texture, clip.Texture).Str());
+        ImGui::TextWrapped("Texture '%s' is not resolved.",
+                           ShortId(EAssetType::Texture, clip.Texture).Str());
         return false;
     }
     const Texture& res = clip._Resolved->Resource;
@@ -220,7 +224,10 @@ bool DrawClipFramePicker(AssetEditor* editor, SpriteClip& clip) {
     bool changed = false;
     // Fixed, modest height so the picker doesn't eat the whole inspector (and hide the playback
     // preview below it); it scrolls if the image is larger.
-    ImGui::BeginChild("frame_picker", ImVec2(0.0f, 300.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("frame_picker",
+                      ImVec2(0.0f, 300.0f),
+                      ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_HorizontalScrollbar);
     if (res.IsValid()) {
         float zoom = editor->PreviewZoom;
         ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -234,8 +241,10 @@ bool DrawClipFramePicker(AssetEditor* editor, SpriteClip& clip) {
         i32 clicked_cell = NONE;
         for (i32 c = 0; c < cell_count; ++c) {
             FrameUv uv = clip.CellRect(c);
-            ImVec2 tl(origin.x + uv.Uv0.x * res.Width * zoom, origin.y + uv.Uv0.y * res.Height * zoom);
-            ImVec2 br(origin.x + uv.Uv1.x * res.Width * zoom, origin.y + uv.Uv1.y * res.Height * zoom);
+            ImVec2 tl(origin.x + uv.Uv0.x * res.Width * zoom,
+                      origin.y + uv.Uv0.y * res.Height * zoom);
+            ImVec2 br(origin.x + uv.Uv1.x * res.Width * zoom,
+                      origin.y + uv.Uv1.y * res.Height * zoom);
             bool in_clip = clip.Frames.Contains(c);
             ImU32 color = in_clip ? IM_COL32(255, 220, 60, 255) : IM_COL32(255, 255, 255, 90);
             float thickness = in_clip ? 2.0f : 1.0f;
@@ -262,7 +271,7 @@ bool DrawClipFramePicker(AssetEditor* editor, SpriteClip& clip) {
 
 // Playback preview for one clip: editor-local fps/loop advance the clip and draw its current baked
 // frame. Playback params live here, not on the clip.
-void DrawClipPlayback(AssetEditor* editor, SpriteClip& clip) {
+void DrawClipPlayback(AssetEditor* editor, SpriteSheetClip& clip) {
     ImGui::SliderFloat("FPS", &editor->ClipFps, 1.0f, 30.0f, "%.0f");
     ImGui::Checkbox("Loop", &editor->ClipLoop);
     ImGui::SameLine();
@@ -299,13 +308,14 @@ void DrawClipPlayback(AssetEditor* editor, SpriteClip& clip) {
 // The expanded editor for the selected clip: retarget its texture, edit its grid, build its frame
 // sequence (grid picker + fill/clear), and preview playback. Any edit re-resolves the clip so the
 // baked frames the preview samples stay current.
-void DrawClipEditor(AssetEditor* editor, AssetRegistry* registry, SpriteClip& clip) {
+void DrawClipEditor(AssetEditor* editor, AssetRegistry* registry, SpriteSheetClip& clip) {
     bool dirty = false;
 
-    const char* tex_preview =
-        clip.Texture.IsValid() ? ShortId(EAssetType::Texture, clip.Texture).Str() : "(choose texture)";
+    const char* tex_preview = clip.Texture.IsValid()
+                                  ? ShortId(EAssetType::Texture, clip.Texture).Str()
+                                  : "(choose texture)";
     if (ImGui::BeginCombo("Texture##CreateClip", tex_preview)) {
-        for (TextureAsset& tex : registry->Textures) {
+        for (TextureAsset& tex : registry->TextureAssets) {
             bool selected = tex.Manifest.Id == clip.Texture;
             if (ImGui::Selectable(ShortId(EAssetType::Texture, tex.Manifest.Id).Str(), selected)) {
                 clip.Texture = tex.Manifest.Id;
@@ -350,7 +360,9 @@ void DrawClipEditor(AssetEditor* editor, AssetRegistry* registry, SpriteClip& cl
     DrawClipPlayback(editor, clip);
 }
 
-void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, SpritesheetAsset* sheet) {
+void DrawSpriteSheetInspector(AssetEditor* editor,
+                              AssetRegistry* registry,
+                              SpriteSheetAsset* sheet) {
     ImGui::Text("Id: %s", sheet->Manifest.Id.Value.Str());
     ImGui::SameLine();
     if (ImGui::Button("Save")) {
@@ -363,12 +375,11 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
     // New-clip form: pick a name + a texture from the registry; grid + frames are set in the clip's
     // editor below once it's added.
     ImGui::InputText("Name", editor->NewClipName, sizeof(editor->NewClipName));
-    const char* clip_tex_preview =
-        editor->NewClipTexture.IsValid()
-            ? ShortId(EAssetType::Texture, editor->NewClipTexture).Str()
-            : "(choose texture)";
+    const char* clip_tex_preview = editor->NewClipTexture.IsValid()
+                                       ? ShortId(EAssetType::Texture, editor->NewClipTexture).Str()
+                                       : "(choose texture)";
     if (ImGui::BeginCombo("Texture##SelectClip", clip_tex_preview)) {
-        for (TextureAsset& tex : registry->Textures) {
+        for (TextureAsset& tex : registry->TextureAssets) {
             bool selected = tex.Manifest.Id == editor->NewClipTexture;
             if (ImGui::Selectable(ShortId(EAssetType::Texture, tex.Manifest.Id).Str(), selected)) {
                 editor->NewClipTexture = tex.Manifest.Id;
@@ -382,10 +393,11 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
     ImGui::BeginDisabled(!can_add_clip);
     if (ImGui::Button("Add Clip")) {
         if (!sheet->Clips.IsFull()) {
-            SpriteClip clip = {};
+            SpriteSheetClip clip = {};
             clip.Name = StringView(editor->NewClipName);
             clip.Texture = editor->NewClipTexture;
-            clip.Resolve(*registry);  // link the texture so the frame picker can slice it right away
+            clip.Resolve(
+                *registry);  // link the texture so the frame picker can slice it right away
             sheet->Clips.Push(clip);
             editor->SelectedClip = clip.Name;
             editor->ClipTime = 0.0f;
@@ -396,9 +408,10 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
     // Existing clips: a dropdown picks one; its editor + preview render once below, instead of each
     // row expanding inline (which crowded the list with the whole form).
     ImGui::Separator();
-    const char* clip_preview = editor->SelectedClip.IsEmpty() ? "(choose clip)" : editor->SelectedClip.Str();
+    const char* clip_preview =
+        editor->SelectedClip.IsEmpty() ? "(choose clip)" : editor->SelectedClip.Str();
     if (ImGui::BeginCombo("Clip", clip_preview)) {
-        for (SpriteClip& clip : sheet->Clips) {
+        for (SpriteSheetClip& clip : sheet->Clips) {
             bool selected = clip.Name == editor->SelectedClip;
             if (ImGui::Selectable(clip.Name.Str(), selected)) {
                 editor->SelectedClip = clip.Name;
@@ -419,7 +432,7 @@ void DrawSpritesheetInspector(AssetEditor* editor, AssetRegistry* registry, Spri
         return;
     }
 
-    SpriteClip& clip = sheet->Clips[selected_idx];
+    SpriteSheetClip& clip = sheet->Clips[selected_idx];
     ImGui::Text("%s  <-  %s  [%d frames]",
                 clip.Name.Str(),
                 ShortId(EAssetType::Texture, clip.Texture).Str(),
@@ -442,7 +455,7 @@ const AssetManifest* FindManifest(AssetRegistry* registry, AssetId id) {
     if (TextureAsset* tex = registry->FindTexture(id)) {
         return &tex->Manifest;
     }
-    if (SpritesheetAsset* sheet = registry->FindSpritesheet(id)) {
+    if (SpriteSheetAsset* sheet = registry->FindSpriteSheet(id)) {
         return &sheet->Manifest;
     }
     if (EnemyAsset* enemy = registry->FindEnemyBlueprint(id)) {
@@ -475,7 +488,11 @@ void DrawAssetMetadata(const AssetManifest* manifest) {
         if (dt.UtcOffsetSeconds != 0) {
             char sign = dt.UtcOffsetSeconds > 0 ? '+' : '-';
             i32 abs_seconds = dt.UtcOffsetSeconds < 0 ? -dt.UtcOffsetSeconds : dt.UtcOffsetSeconds;
-            offset_label = Printf(arena, "UTC%c%02d:%02d", sign, abs_seconds / 3600, (abs_seconds % 3600) / 60);
+            offset_label = Printf(arena,
+                                  "UTC%c%02d:%02d",
+                                  sign,
+                                  abs_seconds / 3600,
+                                  (abs_seconds % 3600) / 60);
         }
         ImGui::Text("Last modified: %04d-%02d-%02d %02d:%02d:%02d %s",
                     dt.Year,
@@ -502,9 +519,10 @@ bool IsGitDirty(const AssetEditor* editor, AssetId id) {
 
 // Turns one `git status --porcelain` line ("XY <path>") into the asset it belongs to and records it
 // in |dirty|. The path is repo-relative ("assets/textures/goblin/walk.yml"); AssetId::Normalize
-// strips the assets/ prefix and the extension, so a dirty .yml and .asset land on the same id. Lines
-// that don't map to an asset (or duplicates) are ignored.
-void CollectDirtyFromLine(StringView line, FixedVector<AssetId, AssetEditor::kMaxDirtyAssets>* dirty) {
+// strips the assets/ prefix and the extension, so a dirty .yml and .asset land on the same id.
+// Lines that don't map to an asset (or duplicates) are ignored.
+void CollectDirtyFromLine(StringView line,
+                          FixedVector<AssetId, AssetEditor::kMaxDirtyAssets>* dirty) {
     if (line.Size > 0) {
         if (line[line.Size - 1] == '\r') {
             line = StringView(line.Str(), line.Size - 1);  // strip CR of a CRLF
@@ -550,7 +568,13 @@ void RunGitVerifyAll(AssetEditor* editor) {
     StringView repo = ForwardSlashes(arena, paths::GetBaseDir(arena));
     // -C sets git's directory (the contract has no cwd param); the pathspec scopes it to assets/.
     StringView args[] = {
-        "git"sv, "-C"sv, repo, "status"sv, "--porcelain"sv, "--"sv, "assets"sv,
+        "git"sv,
+        "-C"sv,
+        repo,
+        "status"sv,
+        "--porcelain"sv,
+        "--"sv,
+        "assets"sv,
     };
     ProcessResult result = RunProcess(arena, std::span<const StringView>(args));
 
@@ -592,7 +616,9 @@ void DrawGitStatus(const AssetEditor* editor, const AssetManifest* manifest) {
         return;
     }
     if (editor->GitExitCode != 0) {
-        ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.2f, 1.0f), "Git: error (exit %d)", editor->GitExitCode);
+        ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.2f, 1.0f),
+                           "Git: error (exit %d)",
+                           editor->GitExitCode);
         return;
     }
     if (IsGitDirty(editor, manifest->Id)) {
@@ -628,11 +654,11 @@ void DrawDatabaseRow(AssetEditor* editor, EAssetType type, AssetId id) {
 
 // The enemy inspector: edits the blueprint's InstanceData in place, then Save writes the manifest.
 // No preview machinery in v1 — the color swatch is the whole visual.
-void DrawEnemyInspector(EnemyAsset* enemy) {
+void DrawEnemyInspector(EnemyAsset* enemy, AssetRegistry* registry) {
     ImGui::Text("Id: %s", enemy->Manifest.Id.Value.Str());
     ImGui::Separator();
 
-    EnemyAsset::InstanceData& data = enemy->Data;
+    EnemyAsset::InstanceData& data = enemy->PerInstanceData;
     ImGui::DragFloat("Speed", &data.Speed, 1.0f, 0.0f, 1000.0f);
     ImGui::DragFloat("Max Health", &data.MaxHealth, 1.0f, 1.0f, 100000.0f);
     ImGui::DragFloat("Damage", &data.Damage, 0.5f, 0.0f, 100000.0f);
@@ -649,6 +675,47 @@ void DrawEnemyInspector(EnemyAsset* enemy) {
         data.Color.G = (u8)(rgba[1] * 255.0f + 0.5f);
         data.Color.B = (u8)(rgba[2] * 255.0f + 0.5f);
         data.Color.A = (u8)(rgba[3] * 255.0f + 0.5f);
+    }
+
+    // Walk-clip reference: pick a sprite sheet, then a clip within it. The reference (sheet id + clip
+    // name) is stored right on PerInstanceData.WalkClip and resolved live — no relink step — so the
+    // status line just re-resolves to reflect the current selection.
+    ImGui::SeparatorText("Sprite");
+    SpriteSheetClipReference& ref = enemy->PerInstanceData.WalkClip;
+
+    const char* sheet_preview = ref.SpriteSheetId.IsValid()
+                                    ? ShortId(EAssetType::SpriteSheet, ref.SpriteSheetId).Str()
+                                    : "(none)";
+    if (ImGui::BeginCombo("Sheet", sheet_preview)) {
+        for (SpriteSheetAsset& sheet : registry->SpriteSheetAssets) {
+            bool selected = sheet.Manifest.Id == ref.SpriteSheetId;
+            if (ImGui::Selectable(ShortId(EAssetType::SpriteSheet, sheet.Manifest.Id).Str(),
+                                  selected)) {
+                ref.SpriteSheetId = sheet.Manifest.Id;
+                ref.ClipName = {};
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    SpriteSheetAsset* sheet = registry->FindSpriteSheet(ref.SpriteSheetId);
+    const char* clip_preview = ref.ClipName.IsEmpty() ? "(choose clip)" : ref.ClipName.Str();
+    if (ImGui::BeginCombo("Clip", clip_preview)) {
+        if (sheet) {
+            for (SpriteSheetClip& clip : sheet->Clips) {
+                bool selected = clip.Name == ref.ClipName;
+                if (ImGui::Selectable(clip.Name.Str(), selected)) {
+                    ref.ClipName = clip.Name;
+                }
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    if (const SpriteSheetClip* walk = ref.Resolve(*registry)) {
+        ImGui::TextDisabled("resolved: %d frames", walk->Frames.Size);
+    } else if (ref.SpriteSheetId.IsValid()) {
+        ImGui::TextDisabled("unresolved");
     }
 
     ImGui::Separator();
@@ -669,8 +736,8 @@ void AssetEditor::Draw(AssetRegistry* registry) {
             DrawTextureTab(registry);
             break;
         }
-        case EAssetType::Spritesheet: {
-            DrawSpritesheetTab(registry);
+        case EAssetType::SpriteSheet: {
+            DrawSpriteSheetTab(registry);
             break;
         }
         case EAssetType::Enemy: {
@@ -708,17 +775,17 @@ void AssetEditor::DrawDatabaseTab(AssetRegistry* registry) {
 
     // Rows show the short (root-relative) id since the group already names the type.
     ImGui::SeparatorText("Textures");
-    for (TextureAsset& tex : registry->Textures) {
+    for (TextureAsset& tex : registry->TextureAssets) {
         DrawDatabaseRow(this, EAssetType::Texture, tex.Manifest.Id);
     }
 
-    ImGui::SeparatorText("Spritesheets");
-    for (SpritesheetAsset& sheet : registry->Spritesheets) {
-        DrawDatabaseRow(this, EAssetType::Spritesheet, sheet.Manifest.Id);
+    ImGui::SeparatorText("SpriteSheets");
+    for (SpriteSheetAsset& sheet : registry->SpriteSheetAssets) {
+        DrawDatabaseRow(this, EAssetType::SpriteSheet, sheet.Manifest.Id);
     }
 
     ImGui::SeparatorText("Enemies");
-    for (EnemyAsset& enemy : registry->EnemyBlueprints) {
+    for (EnemyAsset& enemy : registry->EnemyAssets) {
         DrawDatabaseRow(this, EAssetType::Enemy, enemy.Manifest.Id);
     }
 
@@ -780,8 +847,8 @@ void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
 
     // List pane.
     ImGui::BeginChild("list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
-    ImGui::TextDisabled("Textures (%d)", registry->Textures.Size);
-    for (TextureAsset& tex : registry->Textures) {
+    ImGui::TextDisabled("Textures (%d)", registry->TextureAssets.Size);
+    for (TextureAsset& tex : registry->TextureAssets) {
         bool selected = (tex.Manifest.Id == Selected);
         if (ImGui::Selectable(ShortId(EAssetType::Texture, tex.Manifest.Id).Str(), selected)) {
             Selected = tex.Manifest.Id;
@@ -801,20 +868,20 @@ void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
     ImGui::EndChild();
 }
 
-void AssetEditor::DrawSpritesheetTab(AssetRegistry* registry) {
+void AssetEditor::DrawSpriteSheetTab(AssetRegistry* registry) {
     using namespace asset_editor_private;
 
     // Creation form: a spritesheet is a concept, created from just its id. Textures and clips are
     // added in the inspector.
-    ImGui::SeparatorText("Create Spritesheet");
+    ImGui::SeparatorText("Create SpriteSheet");
 
     ImGui::InputText("Output id", NewSheetId, sizeof(NewSheetId));
-    AssetId normalized = AssetIdFromShort(EAssetType::Spritesheet, StringView(NewSheetId));
+    AssetId normalized = AssetIdFromShort(EAssetType::SpriteSheet, StringView(NewSheetId));
     ImGui::TextDisabled("-> %s", normalized.Value.Str());
 
     if (ImGui::Button("Create")) {
-        if (SpritesheetAsset::Create(normalized)) {
-            registry->LoadSpritesheet(normalized);
+        if (SpriteSheetAsset::Create(normalized)) {
+            registry->LoadSpriteSheet(normalized);
             registry->ResolveReferences();
             Selected = normalized;
         }
@@ -828,10 +895,11 @@ void AssetEditor::DrawSpritesheetTab(AssetRegistry* registry) {
 
     // List pane.
     ImGui::BeginChild("sheet_list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
-    ImGui::TextDisabled("Spritesheets (%d)", registry->Spritesheets.Size);
-    for (SpritesheetAsset& sheet : registry->Spritesheets) {
+    ImGui::TextDisabled("SpriteSheets (%d)", registry->SpriteSheetAssets.Size);
+    for (SpriteSheetAsset& sheet : registry->SpriteSheetAssets) {
         bool selected = (sheet.Manifest.Id == Selected);
-        if (ImGui::Selectable(ShortId(EAssetType::Spritesheet, sheet.Manifest.Id).Str(), selected)) {
+        if (ImGui::Selectable(ShortId(EAssetType::SpriteSheet, sheet.Manifest.Id).Str(),
+                              selected)) {
             Selected = sheet.Manifest.Id;
         }
     }
@@ -841,8 +909,8 @@ void AssetEditor::DrawSpritesheetTab(AssetRegistry* registry) {
 
     // Inspector pane.
     ImGui::BeginChild("sheet_inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
-    if (SpritesheetAsset* sheet = registry->FindSpritesheet(Selected)) {
-        DrawSpritesheetInspector(this, registry, sheet);
+    if (SpriteSheetAsset* sheet = registry->FindSpriteSheet(Selected)) {
+        DrawSpriteSheetInspector(this, registry, sheet);
     } else {
         ImGui::TextWrapped("Select a spritesheet, or create one above.");
     }
@@ -874,8 +942,8 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
 
     // List pane.
     ImGui::BeginChild("enemy_list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
-    ImGui::TextDisabled("Enemies (%d)", registry->EnemyBlueprints.Size);
-    for (EnemyAsset& enemy : registry->EnemyBlueprints) {
+    ImGui::TextDisabled("Enemies (%d)", registry->EnemyAssets.Size);
+    for (EnemyAsset& enemy : registry->EnemyAssets) {
         bool selected = (enemy.Manifest.Id == Selected);
         if (ImGui::Selectable(ShortId(EAssetType::Enemy, enemy.Manifest.Id).Str(), selected)) {
             Selected = enemy.Manifest.Id;
@@ -888,7 +956,7 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
     // Inspector pane.
     ImGui::BeginChild("enemy_inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
     if (EnemyAsset* enemy = registry->FindEnemyBlueprint(Selected)) {
-        DrawEnemyInspector(enemy);
+        DrawEnemyInspector(enemy, registry);
     } else {
         ImGui::TextWrapped("Select an enemy, or create one above.");
     }

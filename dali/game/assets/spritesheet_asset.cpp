@@ -41,7 +41,7 @@ GridDims ComputeGridDims(const SpriteGrid& grid, i32 tex_w, i32 tex_h) {
 
 }  // namespace spritesheet_asset_private
 
-bool SpriteClip::Resolve(AssetRegistry& registry) {
+bool SpriteSheetClip::Resolve(AssetRegistry& registry) {
     _Resolved = registry.FindTexture(Texture);
     _Handle = 0;
     _CellSize = {};
@@ -61,7 +61,7 @@ bool SpriteClip::Resolve(AssetRegistry& registry) {
     return true;
 }
 
-i32 SpriteClip::CellCount() const {
+i32 SpriteSheetClip::CellCount() const {
     using namespace spritesheet_asset_private;
 
     if (!_Resolved) {
@@ -72,7 +72,7 @@ i32 SpriteClip::CellCount() const {
     return dims.Cols * dims.Rows;
 }
 
-FrameUv SpriteClip::CellRect(i32 cell) const {
+FrameUv SpriteSheetClip::CellRect(i32 cell) const {
     using namespace spritesheet_asset_private;
 
     FrameUv uv = {};
@@ -98,7 +98,7 @@ FrameUv SpriteClip::CellRect(i32 cell) const {
     return uv;
 }
 
-i32 SpriteClip::At(float time, float fps, bool loop) const {
+i32 SpriteSheetClip::At(float time, float fps, bool loop) const {
     if (Frames.IsEmpty()) {
         return NONE;
     }
@@ -115,13 +115,13 @@ i32 SpriteClip::At(float time, float fps, bool loop) const {
     return step;
 }
 
-bool SpritesheetAsset::Create(AssetId id) {
+bool SpriteSheetAsset::Create(AssetId id) {
     if (!id.IsValid()) {
-        LogError("SpritesheetAsset::Create: non-canonical id '%s'", id.Value.Str());
+        LogError("SpriteSheetAsset::Create: non-canonical id '%s'", id.Value.Str());
         return false;
     }
 
-    SpritesheetAsset sheet = {};
+    SpriteSheetAsset sheet = {};
     sheet.Manifest.Type = kAssetType;
     sheet.Manifest.Version = kVersion;
     sheet.Manifest.Id = id;
@@ -129,7 +129,7 @@ bool SpritesheetAsset::Create(AssetId id) {
     return sheet.SaveManifest();
 }
 
-std::optional<SpritesheetAsset> SpritesheetAsset::LoadFromDisk(AssetId id) {
+std::optional<SpriteSheetAsset> SpriteSheetAsset::LoadFromDisk(AssetId id) {
     auto scratch = Arena::GetScratch();
     Arena* arena = scratch;
 
@@ -146,7 +146,7 @@ std::optional<SpritesheetAsset> SpritesheetAsset::LoadFromDisk(AssetId id) {
 
     i32 version = node["version"].as<int>(0);
     if (version != kVersion) {
-        LogError("SpritesheetAsset: '%s' is version %d, expected %d - re-author needed",
+        LogError("SpriteSheetAsset: '%s' is version %d, expected %d - re-author needed",
                  id.Value.Str(),
                  version,
                  kVersion);
@@ -155,12 +155,12 @@ std::optional<SpritesheetAsset> SpritesheetAsset::LoadFromDisk(AssetId id) {
 
     AssetId stored = AssetId::Normalize(StringView(node["id"].as<std::string>("").c_str()));
     if (!(stored == id)) {
-        LogError("SpritesheetAsset: id mismatch - manifest says '%s' but lives at '%s'",
+        LogError("SpriteSheetAsset: id mismatch - manifest says '%s' but lives at '%s'",
                  stored.Value.Str(),
                  id.Value.Str());
     }
 
-    SpritesheetAsset sheet = {};
+    SpriteSheetAsset sheet = {};
     sheet.Manifest.Type = kAssetType;
     sheet.Manifest.Version = version;
     sheet.Manifest.Id = id;
@@ -171,7 +171,7 @@ std::optional<SpritesheetAsset> SpritesheetAsset::LoadFromDisk(AssetId id) {
             if (sheet.Clips.IsFull()) {
                 break;
             }
-            SpriteClip clip = {};
+            SpriteSheetClip clip = {};
             clip.Name = StringView(clip_node["name"].as<std::string>("").c_str());
             clip.Texture = AssetId::Normalize(StringView(clip_node["texture"].as<std::string>("").c_str()));
             if (YAML::Node grid = clip_node["grid"]) {
@@ -195,7 +195,7 @@ std::optional<SpritesheetAsset> SpritesheetAsset::LoadFromDisk(AssetId id) {
     return sheet;
 }
 
-bool SpritesheetAsset::SaveManifest() const {
+bool SpriteSheetAsset::SaveManifest() const {
     auto scratch = Arena::GetScratch();
     Arena* arena = scratch;
 
@@ -208,7 +208,7 @@ bool SpritesheetAsset::SaveManifest() const {
     emit << YAML::Key << "id" << YAML::Value << Manifest.Id.Value.Str();
 
     emit << YAML::Key << "clips" << YAML::Value << YAML::BeginSeq;
-    for (const SpriteClip& clip : Clips) {
+    for (const SpriteSheetClip& clip : Clips) {
         emit << YAML::BeginMap;
         emit << YAML::Key << "name" << YAML::Value << clip.Name.Str();
         emit << YAML::Key << "texture" << YAML::Value << clip.Texture.Value.Str();
@@ -229,17 +229,17 @@ bool SpritesheetAsset::SaveManifest() const {
     emit << YAML::EndMap;
 
     if (!WriteFile(yml_path, std::span<const u8>((const u8*)emit.c_str(), emit.size()))) {
-        LogError("SpritesheetAsset: cannot write manifest '%s'", yml_path.Str());
+        LogError("SpriteSheetAsset: cannot write manifest '%s'", yml_path.Str());
         return false;
     }
     return true;
 }
 
-bool SpritesheetAsset::ResolveReferences(AssetRegistry& registry) {
+bool SpriteSheetAsset::ResolveReferences(AssetRegistry& registry) {
     bool all_resolved = true;
-    for (SpriteClip& clip : Clips) {
+    for (SpriteSheetClip& clip : Clips) {
         if (!clip.Resolve(registry)) {
-            LogError("Spritesheet '%s' clip '%s' references missing texture '%s'",
+            LogError("SpriteSheet '%s' clip '%s' references missing texture '%s'",
                      Manifest.Id.Value.Str(),
                      clip.Name.Str(),
                      clip.Texture.Value.Str());
@@ -249,8 +249,19 @@ bool SpritesheetAsset::ResolveReferences(AssetRegistry& registry) {
     return all_resolved;
 }
 
-const SpriteClip* SpritesheetAsset::FindClip(StringView name) const {
-    for (const SpriteClip& clip : Clips) {
+const SpriteSheetClip* SpriteSheetClipReference::Resolve(AssetRegistry& registry) const {
+    if (!SpriteSheetId.IsValid()) {
+        return nullptr;
+    }
+    SpriteSheetAsset* sheet = registry.FindSpriteSheet(SpriteSheetId);
+    if (!sheet) {
+        return nullptr;
+    }
+    return sheet->FindClip(ClipName);
+}
+
+const SpriteSheetClip* SpriteSheetAsset::FindClip(StringView name) const {
+    for (const SpriteSheetClip& clip : Clips) {
         if (clip.Name.Equals(name)) {
             return &clip;
         }

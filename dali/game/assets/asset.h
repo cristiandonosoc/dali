@@ -9,7 +9,7 @@ struct Arena;
 enum class EAssetType : u8 {
     Invalid = 0,
     Texture,
-    Spritesheet,
+    SpriteSheet,
     Enemy,
     COUNT,
 };

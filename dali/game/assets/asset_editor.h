@@ -34,7 +34,7 @@ struct AssetEditor {
     bool NewFlip = false;
     ETextureFilter NewFilter = ETextureFilter::Nearest;
 
-    // Spritesheet creation form scratch: the short concept id (root prepended on create); textures +
+    // SpriteSheet creation form scratch: the short concept id (root prepended on create); textures +
     // clips are added in the inspector.
     char NewSheetId[128] = "goblin";
 
@@ -59,7 +59,7 @@ struct AssetEditor {
     void Draw(AssetRegistry* registry);
     void DrawDatabaseTab(AssetRegistry* registry);
     void DrawTextureTab(AssetRegistry* registry);
-    void DrawSpritesheetTab(AssetRegistry* registry);
+    void DrawSpriteSheetTab(AssetRegistry* registry);
     void DrawEnemyTab(AssetRegistry* registry);
 };
 
