@@ -103,32 +103,78 @@ EnemyAsset::InstanceData ParseInstanceData(const YAML::Node& node) {
     return data;
 }
 
-// The walk-clip reference serializes as a "sprite:" block holding the sheet id and the clip name.
-// Only the two strings are stored; the clip is looked up live at draw via
-// SpriteSheetClipReference::Resolve, so nothing here needs relinking. Omitted when no sheet is set.
-void EmitClipRef(YAML::Emitter& emit, const SpriteSheetClipReference& ref) {
-    if (!ref.SpriteSheetId.IsValid()) {
+// The yml key for each facing's slot in the "walk:" map. Parallel to EFacing; index with (i32)facing.
+constexpr StringView kFacingKeys[(i32)EFacing::COUNT] = {
+    "down"sv,
+    "up"sv,
+    "left"sv,
+    "right"sv,
+};
+
+// The walk animation serializes as a "walk:" map with one sub-block per facing that has a clip set
+// ({sprite_sheet, clip, flip_x}). Each clip is looked up live at draw via
+// SpriteSheetClipReference::Resolve, so nothing here needs relinking. Slots with no sheet — and the
+// whole block when every slot is empty — are omitted.
+void EmitWalkClips(YAML::Emitter& emit, const WalkClips& walk) {
+    bool any = false;
+    for (const DirectionalClip& slot : walk.ByFacing) {
+        any |= slot.Clip.SpriteSheetId.IsValid();
+    }
+    if (!any) {
         return;
     }
-    emit << YAML::Key << "sprite" << YAML::Value << YAML::BeginMap;
-    emit << YAML::Key << "sprite_sheet" << YAML::Value << ref.SpriteSheetId.Value.Str();
-    emit << YAML::Key << "clip" << YAML::Value << ref.ClipName.Str();
+
+    emit << YAML::Key << "walk" << YAML::Value << YAML::BeginMap;
+    for (i32 i = 0; i < (i32)EFacing::COUNT; ++i) {
+        const DirectionalClip& slot = walk.ByFacing[i];
+        if (!slot.Clip.SpriteSheetId.IsValid()) {
+            continue;
+        }
+        emit << YAML::Key << kFacingKeys[i].Str() << YAML::Value << YAML::BeginMap;
+        emit << YAML::Key << "sprite_sheet" << YAML::Value << slot.Clip.SpriteSheetId.Value.Str();
+        emit << YAML::Key << "clip" << YAML::Value << slot.Clip.ClipName.Str();
+        if (slot.FlipX) {
+            emit << YAML::Key << "flip_x" << YAML::Value << true;
+        }
+        emit << YAML::EndMap;
+    }
     emit << YAML::EndMap;
 }
 
-SpriteSheetClipReference ParseClipRef(const YAML::Node& node) {
-    SpriteSheetClipReference ref = {};
-    YAML::Node sprite = node["sprite"];
-    if (!sprite) {
-        return ref;
+WalkClips ParseWalkClips(const YAML::Node& node) {
+    WalkClips walk = {};
+    YAML::Node walk_node = node["walk"];
+    if (!walk_node) {
+        return walk;
     }
-    ref.SpriteSheetId =
-        AssetId::Normalize(StringView(sprite["sprite_sheet"].as<std::string>("").c_str()));
-    ref.ClipName = StringView(sprite["clip"].as<std::string>("").c_str());
-    return ref;
+    for (i32 i = 0; i < (i32)EFacing::COUNT; ++i) {
+        YAML::Node slot_node = walk_node[kFacingKeys[i].Str()];
+        if (!slot_node) {
+            continue;
+        }
+        DirectionalClip& slot = walk.ByFacing[i];
+        slot.Clip.SpriteSheetId =
+            AssetId::Normalize(StringView(slot_node["sprite_sheet"].as<std::string>("").c_str()));
+        slot.Clip.ClipName = StringView(slot_node["clip"].as<std::string>("").c_str());
+        slot.FlipX = slot_node["flip_x"].as<bool>(false);
+    }
+    return walk;
 }
 
 }  // namespace enemy_asset_private
+
+EFacing FacingFromDir(Vec2 dir) {
+    if (Abs(dir.x) >= Abs(dir.y)) {
+        if (dir.x >= 0.0f) {
+            return EFacing::Right;
+        }
+        return EFacing::Left;
+    }
+    if (dir.y >= 0.0f) {
+        return EFacing::Down;
+    }
+    return EFacing::Up;
+}
 
 bool EnemyAsset::Create(AssetId id) {
     if (!id.IsValid()) {
@@ -184,7 +230,7 @@ std::optional<EnemyAsset> EnemyAsset::LoadFromDisk(AssetId id) {
     asset.Manifest.Id = id;
     asset.Manifest.HasPayload = false;
     asset.PerInstanceData = ParseInstanceData(node);
-    asset.PerInstanceData.WalkClip = ParseClipRef(node);
+    asset.PerInstanceData.Walk = ParseWalkClips(node);
     return asset;
 }
 
@@ -202,7 +248,7 @@ bool EnemyAsset::SaveManifest() const {
     emit << YAML::Key << "version" << YAML::Value << kVersion;
     emit << YAML::Key << "id" << YAML::Value << Manifest.Id.Value.Str();
     EmitInstanceData(emit, PerInstanceData);
-    EmitClipRef(emit, PerInstanceData.WalkClip);
+    EmitWalkClips(emit, PerInstanceData.Walk);
     emit << YAML::EndMap;
 
     if (!WriteFile(yml_path, std::span<const u8>((const u8*)emit.c_str(), emit.size()))) {

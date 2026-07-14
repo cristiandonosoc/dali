@@ -1,5 +1,5 @@
 type: enemy
-version: 1
+version: 2
 id: enemies/goblin
 instance:
   speed: 25
@@ -7,6 +7,8 @@ instance:
   damage: 5
   reward: 5
   color: "35ff00ff"
-sprite:
-  sprite_sheet: spritesheets/goblin
-  clip: d_walk
+walk:
+  down: {sprite_sheet: spritesheets/goblin, clip: d_walk}
+  up: {sprite_sheet: spritesheets/goblin, clip: u_walk}
+  left: {sprite_sheet: spritesheets/goblin, clip: s_walk}
+  right: {sprite_sheet: spritesheets/goblin, clip: s_walk, flip_x: true}

@@ -654,34 +654,98 @@ void DrawDatabaseRow(AssetEditor* editor, EAssetType type, AssetId id) {
 
 // The enemy inspector: edits the blueprint's InstanceData in place, then Save writes the manifest.
 // No preview machinery in v1 — the color swatch is the whole visual.
-void DrawEnemyInspector(EnemyAsset* enemy, AssetRegistry* registry) {
-    ImGui::Text("Id: %s", enemy->Manifest.Id.Value.Str());
-    ImGui::Separator();
+const char* FacingLabel(EFacing facing) {
+    switch (facing) {
+        case EFacing::Down: return "Down";
+        case EFacing::Up: return "Up";
+        case EFacing::Left: return "Left";
+        case EFacing::Right: return "Right";
+        default: return "?";
+    }
+}
 
-    EnemyAsset::InstanceData& data = enemy->PerInstanceData;
-    ImGui::DragFloat("Speed", &data.Speed, 1.0f, 0.0f, 1000.0f);
-    ImGui::DragFloat("Max Health", &data.MaxHealth, 1.0f, 1.0f, 100000.0f);
-    ImGui::DragFloat("Damage", &data.Damage, 0.5f, 0.0f, 100000.0f);
-    ImGui::DragInt("Reward", &data.Reward, 1.0f, 0, 100000);
+// A live, animated preview of the enemy's walk clip for one facing. Click the pane to focus it
+// (border highlights); while focused, WASD steer the facing so each direction's clip — flip included
+// — can be checked without spawning. Focus-gating keeps WASD from leaking into the text fields above.
+void DrawEnemyPreview(AssetEditor* editor, const EnemyAsset& enemy, AssetRegistry* registry) {
+    ImGui::SeparatorText("Preview");
 
-    float rgba[4] = {
-        data.Color.R / 255.0f,
-        data.Color.G / 255.0f,
-        data.Color.B / 255.0f,
-        data.Color.A / 255.0f,
-    };
-    if (ImGui::ColorEdit4("Color", rgba)) {
-        data.Color.R = (u8)(rgba[0] * 255.0f + 0.5f);
-        data.Color.G = (u8)(rgba[1] * 255.0f + 0.5f);
-        data.Color.B = (u8)(rgba[2] * 255.0f + 0.5f);
-        data.Color.A = (u8)(rgba[3] * 255.0f + 0.5f);
+    ImGui::BeginChild("enemy_preview",
+                      ImVec2(0.0f, 180.0f),
+                      ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_NoScrollbar);
+    bool active = ImGui::IsWindowFocused();
+    if (active) {
+        if (ImGui::IsKeyPressed(ImGuiKey_W)) {
+            editor->PreviewFacing = EFacing::Up;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_S)) {
+            editor->PreviewFacing = EFacing::Down;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_A)) {
+            editor->PreviewFacing = EFacing::Left;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_D)) {
+            editor->PreviewFacing = EFacing::Right;
+        }
     }
 
-    // Walk-clip reference: pick a sprite sheet, then a clip within it. The reference (sheet id + clip
-    // name) is stored right on PerInstanceData.WalkClip and resolved live — no relink step — so the
-    // status line just re-resolves to reflect the current selection.
-    ImGui::SeparatorText("Sprite");
-    SpriteSheetClipReference& ref = enemy->PerInstanceData.WalkClip;
+    const DirectionalClip& slot = enemy.PerInstanceData.Walk.Resolve(editor->PreviewFacing);
+    const SpriteSheetClip* clip = slot.Clip.Resolve(*registry);
+    bool drawable = clip != nullptr;
+    if (drawable) {
+        drawable &= clip->_Resolved != nullptr;
+    }
+    i32 pos = NONE;
+    if (drawable) {
+        pos = clip->At(editor->PreviewTime, clip->FPS, true);
+        drawable &= pos != NONE;
+        drawable &= pos < clip->_Frames.Size;
+    }
+
+    if (drawable) {
+        FrameUv uv = clip->_Frames[pos];
+        ImVec2 uv0(uv.Uv0.x, uv.Uv0.y);
+        ImVec2 uv1(uv.Uv1.x, uv.Uv1.y);
+        if (slot.FlipX) {
+            float u = uv0.x;
+            uv0.x = uv1.x;
+            uv1.x = u;
+        }
+        float zoom = editor->PreviewZoom;
+        ImVec2 draw_size(clip->_CellSize.x * zoom, clip->_CellSize.y * zoom);
+        // Center the sprite in the pane.
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImVec2 cursor = ImGui::GetCursorPos();
+        ImGui::SetCursorPos(ImVec2(cursor.x + (avail.x - draw_size.x) * 0.5f,
+                                   cursor.y + (avail.y - draw_size.y) * 0.5f));
+        ImGui::Image((ImTextureID)clip->_Handle, draw_size, uv0, uv1);
+    } else {
+        ImGui::TextDisabled("(no baked clip for %s)", FacingLabel(editor->PreviewFacing));
+    }
+    ImGui::EndChild();
+
+    ImGui::Text("Facing: %s", FacingLabel(editor->PreviewFacing));
+    ImGui::SameLine();
+    if (active) {
+        ImGui::TextDisabled("(WASD active)");
+    } else {
+        ImGui::TextDisabled("(click pane, then WASD)");
+    }
+    ImGui::SliderFloat("Zoom##preview", &editor->PreviewZoom, 0.5f, 16.0f, "%.1fx");
+}
+
+// One facing's walk slot: pick a sheet, then a clip within it, then whether to mirror it. The
+// reference (sheet id + clip name) is stored directly on the slot and resolved live — no relink
+// step — so the status line just re-resolves to reflect the current selection. |label| both titles
+// the block and scopes the ImGui ids, so the four identical pickers don't collide.
+void DrawDirectionalClipPicker(const char* label,
+                               DirectionalClip* slot,
+                               AssetRegistry* registry,
+                               float time) {
+    ImGui::PushID(label);
+    ImGui::SeparatorText(label);
+    SpriteSheetClipReference& ref = slot->Clip;
 
     const char* sheet_preview = ref.SpriteSheetId.IsValid()
                                     ? ShortId(EAssetType::SpriteSheet, ref.SpriteSheetId).Str()
@@ -712,11 +776,78 @@ void DrawEnemyInspector(EnemyAsset* enemy, AssetRegistry* registry) {
         ImGui::EndCombo();
     }
 
-    if (const SpriteSheetClip* walk = ref.Resolve(*registry)) {
-        ImGui::TextDisabled("resolved: %d frames", walk->Frames.Size);
+    ImGui::Checkbox("Flip X", &slot->FlipX);
+
+    const SpriteSheetClip* resolved = ref.Resolve(*registry);
+    bool baked = resolved != nullptr;
+    if (baked) {
+        baked &= resolved->_Resolved != nullptr;
+    }
+    if (baked) {
+        // A small running thumbnail so this direction's clip (mirror included) plays right here,
+        // synced to the shared preview clock.
+        i32 pos = resolved->At(time, resolved->FPS, true);
+        bool has_frame = pos != NONE;
+        if (has_frame) {
+            has_frame &= pos < resolved->_Frames.Size;
+        }
+        if (has_frame) {
+            FrameUv uv = resolved->_Frames[pos];
+            ImVec2 uv0(uv.Uv0.x, uv.Uv0.y);
+            ImVec2 uv1(uv.Uv1.x, uv.Uv1.y);
+            if (slot->FlipX) {
+                float u = uv0.x;
+                uv0.x = uv1.x;
+                uv1.x = u;
+            }
+            constexpr float kThumb = 48.0f;
+            float aspect =
+                resolved->_CellSize.y > 0.0f ? resolved->_CellSize.x / resolved->_CellSize.y : 1.0f;
+            ImGui::Image((ImTextureID)resolved->_Handle, ImVec2(kThumb * aspect, kThumb), uv0, uv1);
+        }
     } else if (ref.SpriteSheetId.IsValid()) {
         ImGui::TextDisabled("unresolved");
     }
+    ImGui::PopID();
+}
+
+void DrawEnemyInspector(AssetEditor* editor, EnemyAsset* enemy, AssetRegistry* registry) {
+    ImGui::Text("Id: %s", enemy->Manifest.Id.Value.Str());
+    ImGui::Separator();
+
+    // One shared clock for every preview in this inspector (the four picker thumbnails and the big
+    // steerable pane), advanced once here so they all play in sync.
+    editor->PreviewTime += ImGui::GetIO().DeltaTime;
+
+    EnemyAsset::InstanceData& data = enemy->PerInstanceData;
+    ImGui::DragFloat("Speed", &data.Speed, 1.0f, 0.0f, 1000.0f);
+    ImGui::DragFloat("Max Health", &data.MaxHealth, 1.0f, 1.0f, 100000.0f);
+    ImGui::DragFloat("Damage", &data.Damage, 0.5f, 0.0f, 100000.0f);
+    ImGui::DragInt("Reward", &data.Reward, 1.0f, 0, 100000);
+
+    float rgba[4] = {
+        data.Color.R / 255.0f,
+        data.Color.G / 255.0f,
+        data.Color.B / 255.0f,
+        data.Color.A / 255.0f,
+    };
+    if (ImGui::ColorEdit4("Color", rgba)) {
+        data.Color.R = (u8)(rgba[0] * 255.0f + 0.5f);
+        data.Color.G = (u8)(rgba[1] * 255.0f + 0.5f);
+        data.Color.B = (u8)(rgba[2] * 255.0f + 0.5f);
+        data.Color.A = (u8)(rgba[3] * 255.0f + 0.5f);
+    }
+
+    // Walk animation: one clip slot per facing. A side-view sheet can serve Left and Right by pointing
+    // both at the same clip and ticking Flip X on one.
+    ImGui::SeparatorText("Walk");
+    WalkClips& walk = enemy->PerInstanceData.Walk;
+    DrawDirectionalClipPicker("Down", &walk.ByFacing[(i32)EFacing::Down], registry, editor->PreviewTime);
+    DrawDirectionalClipPicker("Up", &walk.ByFacing[(i32)EFacing::Up], registry, editor->PreviewTime);
+    DrawDirectionalClipPicker("Left", &walk.ByFacing[(i32)EFacing::Left], registry, editor->PreviewTime);
+    DrawDirectionalClipPicker("Right", &walk.ByFacing[(i32)EFacing::Right], registry, editor->PreviewTime);
+
+    DrawEnemyPreview(editor, *enemy, registry);
 
     ImGui::Separator();
     if (ImGui::Button("Save")) {
@@ -956,7 +1087,7 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
     // Inspector pane.
     ImGui::BeginChild("enemy_inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
     if (EnemyAsset* enemy = registry->FindEnemyBlueprint(Selected)) {
-        DrawEnemyInspector(enemy, registry);
+        DrawEnemyInspector(this, enemy, registry);
     } else {
         ImGui::TextWrapped("Select an enemy, or create one above.");
     }

@@ -56,6 +56,11 @@ struct AssetEditor {
     AssetId Selected = {};
     float PreviewZoom = 4.0f;
 
+    // Enemy inspector's animated preview: which facing to show (steered by WASD while the preview
+    // pane holds focus) and its own playback clock.
+    EFacing PreviewFacing = EFacing::Down;
+    float PreviewTime = 0.0f;
+
     void Draw(AssetRegistry* registry);
     void DrawDatabaseTab(AssetRegistry* registry);
     void DrawTextureTab(AssetRegistry* registry);

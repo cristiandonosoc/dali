@@ -94,6 +94,9 @@ struct Enemy {
     // Stats snapshotted from the blueprint at spawn (speed, max health, damage, reward, color). A
     // blueprint edit does not retroactively change enemies already walking.
     EnemyAsset::InstanceData Data = {};
+    // Which way it is walking, picked from the movement vector each step; selects the walk clip to
+    // draw. Live runtime state, not part of the spawn snapshot. Defaults to Down until it first moves.
+    EFacing Facing = EFacing::Down;
     // Which EnemyAsset stamped this. The live link back to the blueprint (a stable id, not a
     // pointer, so it survives a re-crawl / DLL reload);
     AssetId Blueprint = {};

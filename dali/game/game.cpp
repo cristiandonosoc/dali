@@ -172,19 +172,24 @@ void DrawEnemy(DrawContext* dc, const Enemy& enemy) {
     // dc->DrawList->AddCircleFilled(p, 6.0f * dc->Zoom, enemy.Data.Color.Bits);
     // dc->DrawList->AddCircle(p, 6.0f * dc->Zoom, Color32::Black.Bits, 0, 1.5f);
 
-    // Resolved live from the enemy's reference. A drawn enemy is expected to carry a valid, baked
-    // walk clip; a missing one is a data error, not a runtime-recoverable state.
-    const SpriteSheetClip* clip = enemy.Data.WalkClip.Resolve(*dc->Registry);
+    // The slot for this facing, resolved live. A drawn enemy is expected to carry a valid, baked walk
+    // clip for whichever way it faces; a missing one is a data error, not a runtime-recoverable state.
+    const DirectionalClip& slot = enemy.Data.Walk.Resolve(enemy.Facing);
+    const SpriteSheetClip* clip = slot.Clip.Resolve(*dc->Registry);
     ASSERT(clip);
     ASSERT(clip->_Resolved);
     i32 frame = clip->At(dc->Time, clip->FPS, true);
     ImVec2 hsize = ToImVec2((clip->_CellSize * dc->Zoom) / 2.0f);
     FrameUv frameuv = clip->CellRect(frame);
-    dc->DrawList->AddImage(clip->_Resolved->Resource.ImGuiId(),
-                           p - hsize,
-                           p + hsize,
-                           ToImVec2(frameuv.Uv0),
-                           ToImVec2(frameuv.Uv1));
+    ImVec2 uv0 = ToImVec2(frameuv.Uv0);
+    ImVec2 uv1 = ToImVec2(frameuv.Uv1);
+    if (slot.FlipX) {
+        // ImGui samples min.u -> max.u across the quad, so swapping the U bounds mirrors horizontally.
+        float u = uv0.x;
+        uv0.x = uv1.x;
+        uv1.x = u;
+    }
+    dc->DrawList->AddImage(clip->_Resolved->Resource.ImGuiId(), p - hsize, p + hsize, uv0, uv1);
 
     // Health bar, only once the enemy has taken damage (a full bar would just be clutter).
     if (enemy.Data.MaxHealth > 0.0f && enemy.Health < enemy.Data.MaxHealth) {
@@ -615,6 +620,7 @@ void World::UpdateEnemies(float dt) {
             }
 
             Vec2 dir = Normalize(delta);
+            enemy.Facing = FacingFromDir(dir);  // only while actually moving; a stopped enemy holds it
             float move = Min(remaining, dist);
             enemy.Position.x += dir.x * move;
             enemy.Position.y += dir.y * move;
