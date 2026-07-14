@@ -740,7 +740,7 @@ void GameInit(PlatformState* ps, GameState* gs) {
 
     // The blueprint waves spawn until wave-composition exists. If the asset is absent, UpdateWave
     // falls back to a default-stat enemy, so this id being unresolved is not fatal.
-    gs->World.DefaultEnemy = AssetId::Normalize("enemies/goblin"sv);
+    gs->World.DefaultEnemy = AssetId::Normalize("enemies/wolf"sv);
 
     printf("[game] GameInit\n");
 }

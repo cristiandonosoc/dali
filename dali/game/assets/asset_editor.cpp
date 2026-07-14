@@ -3,6 +3,7 @@
 #include <dali/core/api.h>
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
+#include <dali/core/string.h>
 #include <dali/game/file.h>
 #include <dali/game/platform_state.h>
 #include <dali/game/process.h>
@@ -25,11 +26,15 @@ StringView ForwardSlashes(Arena* arena, StringView s) {
     return StringView(buffer, s.Size);
 }
 
-// Copies |s| into a fixed char buffer of |cap| bytes, truncating and null-terminating.
-void CopyToBuffer(StringView s, char* dst, u64 cap) {
-    u64 count = s.Size < cap - 1 ? s.Size : cap - 1;
-    std::memcpy(dst, s.Str(), count);
-    dst[count] = '\0';
+// ImGui::InputText against a FixedString: it edits the backing buffer (kept null-terminated) but has
+// no notion of FixedString::Size, so we resync it after an edit. Returns true when the text changed.
+template <u64 N>
+bool InputTextFixed(const char* label, FixedString<N>& str) {
+    bool changed = ImGui::InputText(label, str.StrMutable(), N);
+    if (changed) {
+        str.Size = (u32)std::strlen(str.StrMutable());
+    }
+    return changed;
 }
 
 // A forward-slashed, lowercased copy for case- and separator-insensitive path comparison: Windows
@@ -83,8 +88,9 @@ StringView ToWorkingDirRelative(Arena* arena, StringView path) {
 }
 
 // Opens the native file dialog for an image and writes the chosen (working-dir-relative) path into
-// |dst| (a fixed char buffer of |cap| bytes). Returns true if a file was chosen.
-bool BrowseForSource(char* dst, u64 cap) {
+// |dst|. Returns true if a file was chosen.
+template <u64 N>
+bool BrowseForSource(FixedString<N>& dst) {
     PlatformState* ps = GetGlobalPlatformState();
     if (!ps || !ps->API.OpenFileDialog) {
         return false;
@@ -100,7 +106,7 @@ bool BrowseForSource(char* dst, u64 cap) {
         return false;
     }
 
-    CopyToBuffer(ToWorkingDirRelative(arena, chosen), dst, cap);
+    dst.Set(ToWorkingDirRelative(arena, chosen));
     return true;
 }
 
@@ -108,7 +114,8 @@ bool BrowseForSource(char* dst, u64 cap) {
 // and replaces the first (category) directory with the asset type's id root. e.g.
 // "raw/sprites/goblin/U_Walk.png" -> "textures/goblin/U_Walk". Case is preserved; the id is
 // canonicalized (lowercased) at create time by AssetId::Normalize.
-void SuggestTextureId(StringView source, char* dst, u64 cap) {
+template <u64 N>
+void SuggestTextureId(StringView source, FixedString<N>& dst) {
     if (source.IsEmpty()) {
         return;
     }
@@ -129,7 +136,7 @@ void SuggestTextureId(StringView source, char* dst, u64 cap) {
         }
     }
 
-    CopyToBuffer(rest, dst, cap);
+    dst.Set(rest);
 }
 
 // Opens the folder containing |source| (a working-dir-relative path) in the OS file manager.
@@ -145,6 +152,126 @@ void OpenSourceFolder(StringView source) {
     Arena* arena = scratch;
     StringView absolute = paths::PathJoin(arena, paths::GetBaseDir(arena), source);
     ps->API.OpenContainingFolder(absolute);
+}
+
+// Case-insensitive suffix match, so ".png"/".PNG" both count.
+bool HasExtensionCi(StringView path, StringView ext) {
+    if (path.Size < ext.Size) {
+        return false;
+    }
+    u64 offset = path.Size - ext.Size;
+    for (u64 i = 0; i < ext.Size; ++i) {
+        char a = path[offset + i];
+        char b = ext[i];
+        if (a >= 'A' && a <= 'Z') {
+            a = (char)(a - 'A' + 'a');
+        }
+        if (b >= 'A' && b <= 'Z') {
+            b = (char)(b - 'A' + 'a');
+        }
+        if (a != b) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Opens the native folder dialog and writes the chosen (working-dir-relative) directory into |dst|.
+// Returns true if a folder was chosen.
+template <u64 N>
+bool BrowseForFolder(FixedString<N>& dst) {
+    PlatformState* ps = GetGlobalPlatformState();
+    if (!ps || !ps->API.OpenFolderDialog) {
+        return false;
+    }
+
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+    StringView chosen = {};
+    if (!ps->API.OpenFolderDialog(arena, &chosen)) {
+        return false;
+    }
+
+    dst.Set(ToWorkingDirRelative(arena, chosen));
+    return true;
+}
+
+// (Re)reads editor->BatchFolder and caches the basenames of its top-level .png files (non-recursive)
+// into editor->BatchFiles. Listing is done here (once, on Load), never per frame, so the live
+// preview that iterates BatchFiles stays cheap.
+void ScanBatchFolder(AssetEditor* editor) {
+    editor->BatchFiles.Clear();
+    if (editor->BatchFolder.IsEmpty()) {
+        return;
+    }
+
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+    StringView abs =
+        paths::PathJoin(arena, paths::GetBaseDir(arena), editor->BatchFolder.ToString());
+    std::span<paths::DirEntry> entries = paths::ListDir(arena, abs);
+    for (const paths::DirEntry& entry : entries) {
+        if (!entry.IsFile()) {
+            continue;
+        }
+        StringView name = paths::GetBasename(arena, entry.Path);
+        if (!HasExtensionCi(name, ".png"sv)) {
+            continue;
+        }
+        if (editor->BatchFiles.IsFull()) {
+            break;
+        }
+        editor->BatchFiles.Push(FixedString<128>(name));
+    }
+}
+
+// Imports each cached .png as textures/<prefix>/<stem>, skipping any id that collides (after
+// normalization) with an earlier file in the batch. Tallies onto editor->BatchResult*.
+void ImportBatch(AssetEditor* editor, AssetRegistry* registry) {
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+
+    TextureImportSettings settings = {};
+    settings.FlipVertically = editor->BatchFlip;
+
+    FixedVector<AssetId, AssetEditor::kMaxBatch> seen = {};
+    i32 ok = 0;
+    i32 skip = 0;
+    i32 fail = 0;
+    AssetId first = {};
+    for (FixedString<128>& file : editor->BatchFiles) {
+        StringView name = StringView(file.Str());
+        StringView stem = paths::RemoveExtension(arena, name);
+        StringView short_id = stem;
+        if (!editor->BatchPrefix.IsEmpty()) {
+            short_id = Printf(arena, "%s/%s", editor->BatchPrefix.Str(), stem.Str());
+        }
+        AssetId id = AssetIdFromShort(EAssetType::Texture, short_id);
+        if (seen.Contains(id)) {
+            skip++;
+            continue;
+        }
+        seen.Push(id);
+
+        StringView source =
+            ForwardSlashes(arena, Printf(arena, "%s/%s", editor->BatchFolder.Str(), name.Str()));
+        if (TextureAsset::Import(source, id, settings, editor->BatchFilter)) {
+            registry->LoadTexture(id);
+            if (ok == 0) {
+                first = id;
+            }
+            ok++;
+        } else {
+            fail++;
+        }
+    }
+
+    editor->BatchResultOk = ok;
+    editor->BatchResultSkip = skip;
+    editor->BatchResultFail = fail;
+    if (ok > 0) {
+        editor->Selected = first;  // so a later switch to List lands on a freshly imported texture
+    }
 }
 
 const char* FilterLabel(ETextureFilter filter) {
@@ -374,7 +501,7 @@ void DrawSpriteSheetInspector(AssetEditor* editor,
 
     // New-clip form: pick a name + a texture from the registry; grid + frames are set in the clip's
     // editor below once it's added.
-    ImGui::InputText("Name", editor->NewClipName, sizeof(editor->NewClipName));
+    InputTextFixed("Name", editor->NewClipName);
     const char* clip_tex_preview = editor->NewClipTexture.IsValid()
                                        ? ShortId(EAssetType::Texture, editor->NewClipTexture).Str()
                                        : "(choose texture)";
@@ -388,13 +515,13 @@ void DrawSpriteSheetInspector(AssetEditor* editor,
         ImGui::EndCombo();
     }
 
-    bool can_add_clip = editor->NewClipName[0] != '\0';
+    bool can_add_clip = !editor->NewClipName.IsEmpty();
     can_add_clip &= editor->NewClipTexture.IsValid();
     ImGui::BeginDisabled(!can_add_clip);
     if (ImGui::Button("Add Clip")) {
         if (!sheet->Clips.IsFull()) {
             SpriteSheetClip clip = {};
-            clip.Name = StringView(editor->NewClipName);
+            clip.Name = editor->NewClipName;
             clip.Texture = editor->NewClipTexture;
             clip.Resolve(
                 *registry);  // link the texture so the frame picker can slice it right away
@@ -936,26 +1063,41 @@ void AssetEditor::DrawDatabaseTab(AssetRegistry* registry) {
 }
 
 void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
+    // Two modes: the per-texture List (create + inspect) and Batch Import (a whole folder at once).
+    if (ImGui::BeginTabBar("texture_modes")) {
+        if (ImGui::BeginTabItem("List")) {
+            DrawTextureListView(registry);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Batch Import")) {
+            DrawTextureBatchView(registry);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+}
+
+void AssetEditor::DrawTextureListView(AssetRegistry* registry) {
     using namespace asset_editor_private;
 
     // Creation form.
     ImGui::SeparatorText("Create Texture");
-    ImGui::InputText("Source (raw)", NewSource, sizeof(NewSource));
+    InputTextFixed("Source (raw)", NewSource);
     ImGui::SameLine();
     if (ImGui::Button("Browse...")) {
-        if (BrowseForSource(NewSource, sizeof(NewSource))) {
-            SuggestTextureId(StringView(NewSource), NewId, sizeof(NewId));
+        if (BrowseForSource(NewSource)) {
+            SuggestTextureId(NewSource.ToString(), NewId);
         }
     }
     ImGui::SameLine();
     if (ImGui::Button("Open Dir")) {
-        OpenSourceFolder(StringView(NewSource));
+        OpenSourceFolder(NewSource.ToString());
     }
-    ImGui::InputText("Output id", NewId, sizeof(NewId));
+    InputTextFixed("Output id", NewId);
 
     // The field is root-relative; the tab's type supplies the root. The preview shows the full
     // canonical id the create will actually use.
-    AssetId normalized = AssetIdFromShort(EAssetType::Texture, StringView(NewId));
+    AssetId normalized = AssetIdFromShort(EAssetType::Texture, NewId.ToString());
     ImGui::TextDisabled("-> %s", normalized.Value.Str());
 
     ImGui::Checkbox("Flip vertically", &NewFlip);
@@ -964,7 +1106,7 @@ void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
     if (ImGui::Button("Create / Re-import")) {
         TextureImportSettings settings = {};
         settings.FlipVertically = NewFlip;
-        if (TextureAsset::Import(StringView(NewSource), normalized, settings, NewFilter)) {
+        if (TextureAsset::Import(NewSource.ToString(), normalized, settings, NewFilter)) {
             registry->LoadTexture(normalized);
             Selected = normalized;
         }
@@ -999,6 +1141,101 @@ void AssetEditor::DrawTextureTab(AssetRegistry* registry) {
     ImGui::EndChild();
 }
 
+void AssetEditor::DrawTextureBatchView(AssetRegistry* registry) {
+    using namespace asset_editor_private;
+
+    // Stage 1: choose a folder. Browse fills the path; Browse or Load then scans it into memory.
+    ImGui::SeparatorText("Source folder");
+    InputTextFixed("Folder (raw)", BatchFolder);
+    ImGui::SameLine();
+    bool load = false;
+    if (ImGui::Button("Browse...")) {
+        load = BrowseForFolder(BatchFolder);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Load")) {
+        load = true;
+    }
+
+    if (load) {
+        // Propose the prefix as the project-relative folder path; the user edits it to taste.
+        BatchPrefix.Set(BatchFolder.ToString());
+        ScanBatchFolder(this);
+        BatchLoaded = true;
+        BatchResultOk = NONE;  // a fresh load invalidates the previous tally
+    }
+
+    if (!BatchLoaded) {
+        ImGui::TextDisabled("Pick a folder and Load to list its .png files.");
+        return;
+    }
+
+    // Stage 2: edit the prefix + settings, preview the resulting ids, import.
+    ImGui::Separator();
+    InputTextFixed("Asset path prefix", BatchPrefix);
+    ImGui::Checkbox("Flip vertically", &BatchFlip);
+    DrawFilterCombo("Filter", &BatchFilter);
+
+    if (BatchFiles.IsEmpty()) {
+        ImGui::TextDisabled("(no .png found in %s)", BatchFolder.Str());
+        return;
+    }
+
+    // Live preview over the cached list: compute each file's final id, flag duplicates (same id
+    // after normalization) and ids that already exist (a re-import). Pure string work — cheap.
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+    FixedVector<AssetId, kMaxBatch> seen = {};
+    i32 importable = 0;
+
+    ImGui::BeginChild("batch_preview", ImVec2(0.0f, 240.0f), ImGuiChildFlags_Borders);
+    for (FixedString<128>& file : BatchFiles) {
+        StringView name = StringView(file.Str());
+        StringView stem = paths::RemoveExtension(arena, name);
+        StringView short_id = stem;
+        if (!BatchPrefix.IsEmpty()) {
+            short_id = Printf(arena, "%s/%s", BatchPrefix.Str(), stem.Str());
+        }
+        AssetId id = AssetIdFromShort(EAssetType::Texture, short_id);
+
+        bool dup = seen.Contains(id);
+        const char* tag = "new";
+        if (dup) {
+            tag = "dup - skipped";
+        } else {
+            bool exists = registry->FindTexture(id) != nullptr;
+            tag = exists ? "exists (re-import)" : "new";
+            seen.Push(id);
+            importable++;
+        }
+        ImGui::Text("%s  ->  %s", name.Str(), id.Value.Str());
+        ImGui::SameLine();
+        ImGui::TextDisabled("[%s]", tag);
+    }
+    ImGui::EndChild();
+
+    char label[64];
+    snprintf(label, sizeof(label), "Import %d textures", importable);
+    bool disabled = importable == 0;
+    if (disabled) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button(label)) {
+        ImportBatch(this, registry);
+    }
+    if (disabled) {
+        ImGui::EndDisabled();
+    }
+
+    if (BatchResultOk != NONE) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("imported %d, skipped %d, failed %d",
+                            BatchResultOk,
+                            BatchResultSkip,
+                            BatchResultFail);
+    }
+}
+
 void AssetEditor::DrawSpriteSheetTab(AssetRegistry* registry) {
     using namespace asset_editor_private;
 
@@ -1006,8 +1243,8 @@ void AssetEditor::DrawSpriteSheetTab(AssetRegistry* registry) {
     // added in the inspector.
     ImGui::SeparatorText("Create SpriteSheet");
 
-    ImGui::InputText("Output id", NewSheetId, sizeof(NewSheetId));
-    AssetId normalized = AssetIdFromShort(EAssetType::SpriteSheet, StringView(NewSheetId));
+    InputTextFixed("Output id", NewSheetId);
+    AssetId normalized = AssetIdFromShort(EAssetType::SpriteSheet, NewSheetId.ToString());
     ImGui::TextDisabled("-> %s", normalized.Value.Str());
 
     if (ImGui::Button("Create")) {
@@ -1054,8 +1291,8 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
     // Creation form: a blueprint is created from just its id; stats are edited in the inspector.
     ImGui::SeparatorText("Create Enemy");
 
-    ImGui::InputText("Output id", NewEnemyId, sizeof(NewEnemyId));
-    AssetId normalized = AssetIdFromShort(EAssetType::Enemy, StringView(NewEnemyId));
+    InputTextFixed("Output id", NewEnemyId);
+    AssetId normalized = AssetIdFromShort(EAssetType::Enemy, NewEnemyId.ToString());
     ImGui::TextDisabled("-> %s", normalized.Value.Str());
 
     if (ImGui::Button("Create")) {

@@ -107,7 +107,7 @@ std::span<u8> Arena::PushZero(u64 size, u64 alignment) {
 
 std::span<Arena> Arena::ReferenceScratch() {
     using namespace memory_private;
-    constexpr i32 kScratchArenaCount = 4;
+    constexpr i32 kScratchArenaCount = 8;
     static_assert(kScratchArenaCount <= (i32)kScratchArenaNames.Size,
                   "Not enough scratch arena names");
     static bool gInitialized = false;

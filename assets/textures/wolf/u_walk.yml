@@ -1,0 +1,9 @@
+type: texture
+version: 1
+id: textures/wolf/u_walk
+source: raw/sprites/wolf/U_Walk.png
+width: 288
+height: 48
+channels: 4
+flip: 0
+filter: 0

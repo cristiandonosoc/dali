@@ -1,0 +1,9 @@
+type: texture
+version: 1
+id: textures/goblin/s_attack
+source: raw/sprites/goblin/S_Attack.png
+width: 288
+height: 48
+channels: 4
+flip: 0
+filter: 0

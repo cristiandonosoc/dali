@@ -7,3 +7,17 @@ instance:
   damage: 5
   reward: 5
   color: "46158cff"
+walk:
+  down:
+    sprite_sheet: spritesheets/wolf
+    clip: d_walk
+  up:
+    sprite_sheet: spritesheets/wolf
+    clip: u_walk
+  left:
+    sprite_sheet: spritesheets/wolf
+    clip: s_walk
+  right:
+    sprite_sheet: spritesheets/wolf
+    clip: s_walk
+    flip_x: true

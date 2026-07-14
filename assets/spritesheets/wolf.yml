@@ -2,4 +2,15 @@ type: spritesheet
 version: 3
 id: spritesheets/wolf
 clips:
-  []
+  - name: u_walk
+    texture: textures/wolf/u_walk
+    grid: {cell_w: 48, cell_h: 48, margin: 0, spacing: 0}
+    frames: [0, 1, 2, 3, 4, 5]
+  - name: d_walk
+    texture: textures/wolf/d_walk
+    grid: {cell_w: 48, cell_h: 48, margin: 0, spacing: 0}
+    frames: [0, 1, 2, 3, 4, 5]
+  - name: s_walk
+    texture: textures/wolf/s_walk
+    grid: {cell_w: 48, cell_h: 48, margin: 0, spacing: 0}
+    frames: [0, 1, 2, 3, 4, 5]

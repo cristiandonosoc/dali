@@ -81,6 +81,20 @@ bool OpenFileDialog(Arena* arena, StringView* out_path, std::span<const FileDial
     return true;
 }
 
+bool OpenFolderDialog(Arena* arena, StringView* out_path) {
+    NFD::UniquePath nfd_path;
+    nfdresult_t result = NFD::PickFolder(nfd_path);
+    if (result != NFD_OKAY) {
+        if (result == NFD_ERROR) {
+            SDL_Log("ERROR: folder dialog: %s", NFD::GetError());
+        }
+        return false;  // NFD_CANCEL lands here too, silently.
+    }
+
+    *out_path = InternStringToArena(arena, nfd_path.get());
+    return true;
+}
+
 void OpenContainingFolder(StringView path) {
     auto scratch = Arena::GetScratch();
     Arena* arena = scratch;
@@ -296,6 +310,7 @@ bool PlatformInit(PlatformState* ps, const PlatformInitConfig& config) {
     ps->API.WriteFile = PlatformWriteFile;
     ps->API.GLGetProcAddress = (decltype(ps->API.GLGetProcAddress))SDL_GL_GetProcAddress;
     ps->API.OpenFileDialog = OpenFileDialog;
+    ps->API.OpenFolderDialog = OpenFolderDialog;
     ps->API.OpenContainingFolder = OpenContainingFolder;
     ps->API.GetFileModTime = GetFileModTime;
     ps->API.RunProcess = RunProcess;

@@ -88,6 +88,10 @@ struct PlatformAPI {
                            StringView* out_path,
                            std::span<const FileDialogFilter> filters) = nullptr;
 
+    // Opens a native, modal "select folder" dialog. On success returns true and writes the chosen
+    // absolute directory path into |out_path| (interned into |arena|); false on cancel or error.
+    bool (*OpenFolderDialog)(Arena* arena, StringView* out_path) = nullptr;
+
     // Opens |path| in the OS file manager. If |path| is a file, opens its containing directory
     // instead. |path| should be absolute. No-op on failure.
     void (*OpenContainingFolder)(StringView path) = nullptr;

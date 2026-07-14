@@ -29,20 +29,34 @@ struct AssetEditor {
 
     // Texture creation form scratch. The id is the short, root-relative form (the "textures/" root
     // is prepended on create); Source stays a full raw path.
-    char NewSource[256] = "raw/sprites/goblin/D_Walk.png";
-    char NewId[128] = "goblin/walk";
+    FixedString<256> NewSource = "raw/sprites/goblin/D_Walk.png";
+    FixedString<128> NewId = "goblin/walk";
     bool NewFlip = false;
     ETextureFilter NewFilter = ETextureFilter::Nearest;
 
     // SpriteSheet creation form scratch: the short concept id (root prepended on create); textures +
     // clips are added in the inspector.
-    char NewSheetId[128] = "goblin";
+    FixedString<128> NewSheetId = "goblin";
+
+    // Texture "Batch Import" mode: import every .png in a folder in one shot. The folder is scanned
+    // once (on Load/Browse) into BatchFiles and kept in memory; the prefix is proposed as the
+    // project-relative folder path and is editable (final id = textures/<prefix>/<stem>).
+    static constexpr i32 kMaxBatch = 128;
+    FixedString<256> BatchFolder = {};  // source dir, working-dir-relative
+    FixedString<128> BatchPrefix = {};  // asset-path prefix
+    bool BatchLoaded = false;    // a folder has been scanned (gates the second stage of the view)
+    FixedVector<FixedString<128>, kMaxBatch> BatchFiles = {};  // cached .png basenames from the scan
+    bool BatchFlip = false;
+    ETextureFilter BatchFilter = ETextureFilter::Nearest;
+    i32 BatchResultOk = NONE;  // last import tally (NONE == none run since the last Load)
+    i32 BatchResultSkip = 0;
+    i32 BatchResultFail = 0;
 
     // Enemy creation form scratch: the short id (root prepended on create); stats edited in the
     // inspector.
-    char NewEnemyId[128] = "goblin";
+    FixedString<128> NewEnemyId = "goblin";
     // New-clip form scratch (a clip carries its own texture + grid; both edited in the inspector).
-    char NewClipName[64] = "";
+    FixedString<64> NewClipName = {};
     AssetId NewClipTexture = {};
 
     // Clip playback preview (editor-local; deliberately not stored on the clip).
@@ -64,6 +78,8 @@ struct AssetEditor {
     void Draw(AssetRegistry* registry);
     void DrawDatabaseTab(AssetRegistry* registry);
     void DrawTextureTab(AssetRegistry* registry);
+    void DrawTextureListView(AssetRegistry* registry);
+    void DrawTextureBatchView(AssetRegistry* registry);
     void DrawSpriteSheetTab(AssetRegistry* registry);
     void DrawEnemyTab(AssetRegistry* registry);
 };
