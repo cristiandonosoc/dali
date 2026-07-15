@@ -577,18 +577,10 @@ void DrawClipEditor(AssetEditor* editor, AssetRegistry* registry, SpriteSheetCli
     DrawClipPlayback(editor, clip);
 }
 
-void DrawSpriteSheetInspector(AssetEditor* editor,
-                              AssetRegistry* registry,
-                              SpriteSheetAsset* sheet) {
-    ImGui::Text("Id: %s", sheet->Manifest.Id.Value.Str());
-    ImGui::SameLine();
-    if (ImGui::Button("Save")) {
-        sheet->SaveManifest();
-    }
-
-    // --- Clips (each carries its own texture + grid) ---
-    ImGui::SeparatorText("Clips");
-
+// The single-clip authoring tab: add one clip at a time, then pick one to edit its grid/frames.
+void DrawSpriteSheetClipTab(AssetEditor* editor,
+                            AssetRegistry* registry,
+                            SpriteSheetAsset* sheet) {
     // New-clip form: pick a name + a texture from the registry; grid + frames are set in the clip's
     // editor below once it's added.
     InputTextFixed("Name", editor->NewClipName);
@@ -647,6 +639,242 @@ void DrawSpriteSheetInspector(AssetEditor* editor,
     if (ImGui::Button("Remove Clip")) {
         sheet->Clips.RemoveUnorderedAt(selected_idx);
         editor->SelectedClip = {};
+    }
+}
+
+// The last '/'-separated segment of a short id ("wolf/d_walk" -> "d_walk"); the whole string if it
+// has no slash. This is the clip name a texture contributes in batch create.
+StringView LastSegment(StringView short_id) {
+    u64 start = 0;
+    for (u64 i = 0; i < short_id.Size; i++) {
+        if (short_id[i] == '/') {
+            start = i + 1;
+        }
+    }
+    return StringView(short_id.Str() + start, short_id.Size - start);
+}
+
+// The clip name a texture yields in batch create: |prefix| + the texture's basename.
+StringView ClipNameForTexture(Arena* arena, StringView prefix, const AssetId& texture) {
+    StringView base = LastSegment(ShortId(EAssetType::Texture, texture));
+    if (prefix.IsEmpty()) {
+        return base;
+    }
+    return Printf(arena, "%s%s", prefix.Str(), base.Str());
+}
+
+// Whether |name| is already in |names| (linear; the batch is small).
+bool ClipNameSeen(const FixedVector<FixedString<64>, AssetEditor::kMaxBatchClips>& names,
+                  StringView name) {
+    for (const FixedString<64>& n : names) {
+        if (n.Equals(name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A grid can carve cells only if both cell dimensions are positive (margin/spacing may be 0).
+bool BatchGridIsValid(const SpriteGrid& grid) {
+    bool ok = grid.CellW > 0;
+    ok &= grid.CellH > 0;
+    return ok;
+}
+
+// Creates a clip per selected texture, all sharing editor->ClipBatchGrid. Skips names that repeat
+// within the batch or already exist in the sheet (never overwrites). Optionally fills every cell as a
+// frame. Tallies onto editor->ClipBatchResult*.
+void BatchCreateClips(AssetEditor* editor, AssetRegistry* registry, SpriteSheetAsset* sheet) {
+    auto scratch = Arena::GetScratch();
+    FixedVector<FixedString<64>, AssetEditor::kMaxBatchClips> seen = {};
+    i32 ok = 0;
+    i32 skip = 0;
+    FixedString<64> last_created = {};
+    for (const AssetId& texture : editor->ClipBatchSelection) {
+        StringView name = ClipNameForTexture(scratch, editor->ClipBatchPrefix.ToString(), texture);
+        if (ClipNameSeen(seen, name)) {
+            skip++;
+            continue;
+        }
+        seen.Push(FixedString<64>(name));
+        if (sheet->FindClip(name)) {
+            skip++;
+            continue;
+        }
+        if (sheet->Clips.IsFull()) {
+            break;
+        }
+
+        SpriteSheetClip clip = {};
+        clip.Name = name;
+        clip.Texture = texture;
+        clip.Grid = editor->ClipBatchGrid;
+        clip.Resolve(*registry);  // link the texture so the grid can slice it
+        if (editor->ClipBatchFillFrames) {
+            i32 count = clip.CellCount();
+            for (i32 c = 0; c < count; c++) {
+                if (clip.Frames.IsFull()) {
+                    break;
+                }
+                clip.Frames.Push(c);
+            }
+            clip.Resolve(*registry);  // re-bake now that Frames is populated
+        }
+        sheet->Clips.Push(clip);
+        last_created = clip.Name;
+        ok++;
+    }
+
+    editor->ClipBatchResultOk = ok;
+    editor->ClipBatchResultSkip = skip;
+    if (ok > 0) {
+        editor->SelectedClip = last_created;  // so switching to the Clip tab lands on a new clip
+        editor->ClipTime = 0.0f;
+    }
+}
+
+// The batch-create tab: pick a shared grid + prefix, multi-select textures, and turn each into a clip
+// named after its basename in one shot. Mirrors the texture tab's Batch Import.
+void DrawSpriteSheetBatchTab(AssetEditor* editor, AssetRegistry* registry, SpriteSheetAsset* sheet) {
+    // Grid + fill applied to every clip this batch creates.
+    ImGui::SeparatorText("Grid (applied to all)");
+    SpriteGrid& grid = editor->ClipBatchGrid;
+    ImGui::InputInt("Cell W", &grid.CellW);
+    ImGui::InputInt("Cell H", &grid.CellH);
+    ImGui::InputInt("Margin", &grid.Margin);
+    ImGui::InputInt("Spacing", &grid.Spacing);
+    ImGui::Checkbox("Fill all frames", &editor->ClipBatchFillFrames);
+
+    ImGui::SeparatorText("Naming");
+    InputTextFixed("Clip name prefix", editor->ClipBatchPrefix);
+
+    // Texture multi-select: click a row to toggle it in/out of the selection.
+    ImGui::SeparatorText("Textures");
+    DrawFilterBox("##clipbatch_filter", editor->ClipBatchFilter, 240.0f);
+    ImGui::SameLine();
+    bool select_all = ImGui::SmallButton("Select all");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear")) {
+        editor->ClipBatchSelection.Clear();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%d selected)", editor->ClipBatchSelection.Size);
+
+    auto scratch = Arena::GetScratch();
+    std::span<const AssetId*> tex_ids = SortedFilteredIds(scratch,
+                                                          registry->TextureAssets,
+                                                          EAssetType::Texture,
+                                                          editor->ClipBatchFilter.ToString());
+
+    if (select_all) {
+        for (const AssetId* id : tex_ids) {
+            if (editor->ClipBatchSelection.IsFull()) {
+                break;
+            }
+            if (!editor->ClipBatchSelection.Contains(*id)) {
+                editor->ClipBatchSelection.Push(*id);
+            }
+        }
+    }
+
+    ImGui::BeginChild("clipbatch_textures", ImVec2(0.0f, 160.0f), ImGuiChildFlags_Borders);
+    for (const AssetId* id : tex_ids) {
+        bool selected = editor->ClipBatchSelection.Contains(*id);
+        if (ImGui::Selectable(ShortId(EAssetType::Texture, *id).Str(), selected)) {
+            i32 idx = NONE;
+            for (i32 i = 0; i < editor->ClipBatchSelection.Size; i++) {
+                if (editor->ClipBatchSelection[i] == *id) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx != NONE) {
+                editor->ClipBatchSelection.RemoveUnorderedAt(idx);
+            } else if (!editor->ClipBatchSelection.IsFull()) {
+                editor->ClipBatchSelection.Push(*id);
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    if (editor->ClipBatchSelection.IsEmpty()) {
+        ImGui::TextDisabled("Select one or more textures to create clips from.");
+        return;
+    }
+
+    // Preview: each selected texture -> its resulting clip name, with a status tag. Pure string work.
+    ImGui::SeparatorText("Preview");
+    FixedVector<FixedString<64>, AssetEditor::kMaxBatchClips> seen = {};
+    i32 creatable = 0;
+    ImGui::BeginChild("clipbatch_preview", ImVec2(0.0f, 140.0f), ImGuiChildFlags_Borders);
+    for (const AssetId& texture : editor->ClipBatchSelection) {
+        StringView name = ClipNameForTexture(scratch, editor->ClipBatchPrefix.ToString(), texture);
+        const char* tag = "new";
+        if (ClipNameSeen(seen, name)) {
+            tag = "dup - skipped";
+        } else {
+            seen.Push(FixedString<64>(name));
+            if (sheet->FindClip(name)) {
+                tag = "exists - skipped";
+            } else {
+                tag = "new";
+                creatable++;
+            }
+        }
+        ImGui::Text("%s  ->  %s", ShortId(EAssetType::Texture, texture).Str(), name.Str());
+        ImGui::SameLine();
+        ImGui::TextDisabled("[%s]", tag);
+    }
+    ImGui::EndChild();
+
+    bool grid_ok = BatchGridIsValid(grid);
+    if (!grid_ok) {
+        ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.2f, 1.0f),
+                           "Set Cell W and Cell H (> 0) to create clips.");
+    }
+
+    char label[64];
+    snprintf(label, sizeof(label), "Create %d clips", creatable);
+    bool disabled = creatable == 0;
+    disabled |= !grid_ok;
+    if (disabled) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button(label)) {
+        BatchCreateClips(editor, registry, sheet);
+    }
+    if (disabled) {
+        ImGui::EndDisabled();
+    }
+
+    if (editor->ClipBatchResultOk != NONE) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("created %d, skipped %d",
+                            editor->ClipBatchResultOk,
+                            editor->ClipBatchResultSkip);
+    }
+}
+
+void DrawSpriteSheetInspector(AssetEditor* editor,
+                              AssetRegistry* registry,
+                              SpriteSheetAsset* sheet) {
+    ImGui::Text("Id: %s", sheet->Manifest.Id.Value.Str());
+    ImGui::SameLine();
+    if (ImGui::Button("Save")) {
+        sheet->SaveManifest();
+    }
+
+    // Two ways to author clips: one at a time (Clip), or a whole folder of textures at once (Batch).
+    if (ImGui::BeginTabBar("sheet_clip_modes")) {
+        if (ImGui::BeginTabItem("Clip")) {
+            DrawSpriteSheetClipTab(editor, registry, sheet);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Batch Create")) {
+            DrawSpriteSheetBatchTab(editor, registry, sheet);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
     }
 }
 

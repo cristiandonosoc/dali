@@ -1,0 +1,9 @@
+type: texture
+version: 1
+id: textures/towers/archer_tower/upgrade_5
+source: raw/sprites/towers/archer_tower/upgrade_5.png
+width: 280
+height: 130
+channels: 4
+flip: 0
+filter: 0
