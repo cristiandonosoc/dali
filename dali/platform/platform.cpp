@@ -154,7 +154,8 @@ ProcessResult RunProcess(Arena* arena, std::span<const StringView> args) {
         return result;
     }
 
-    auto scratch = Arena::GetScratch();
+    // |arena| receives Stdout below, so it must not also be the scratch.
+    auto scratch = Arena::GetScratch(arena);
     Arena* scratch_arena = scratch;
 
     // SDL wants a NULL-terminated argv of C strings. A StringView may be a non-terminated substring,

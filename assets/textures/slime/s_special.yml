@@ -1,0 +1,9 @@
+type: texture
+version: 1
+id: textures/slime/s_special
+source: raw/sprites/slime/S_Special.png
+width: 288
+height: 48
+channels: 4
+flip: 0
+filter: 0

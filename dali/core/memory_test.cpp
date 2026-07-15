@@ -439,7 +439,7 @@ TEST_CASE("Scratch arena", "[memory]") {
         using namespace memory_test_private;
 
         {
-            ScratchArena scratch = Arena::GetScratch();
+            ScopedArena scratch = Arena::GetScratch();
             REQUIRE(scratch.Arena->Offset == 0);
 
             StringView msg1 = SomeFile(scratch.Arena, 33);
@@ -455,35 +455,59 @@ TEST_CASE("Scratch arena", "[memory]") {
         REQUIRE(scratch.Arena->Offset == 0);
     }
 
-    SECTION("Nested scratch arenas never collide") {
-        using namespace memory_test_private;
+    SECTION("Nested scratch arenas share and stack") {
+        auto scratch_arenas = Arena::ReferenceScratch();
 
-        // Two live scratch arenas are always distinct, without passing any conflicts.
+        // Plain (conflict-less) nested calls all share the first arena; each scope only rolls back
+        // what it pushed, so depth is unbounded by the pool size.
         {
             auto scratch1 = Arena::GetScratch();
             auto scratch2 = Arena::GetScratch();
-            REQUIRE(scratch1.Arena != scratch2.Arena);
+            ScopedArena scratch3 = Arena::GetScratch();
+            REQUIRE(scratch1.Arena == &scratch_arenas[0]);
+            REQUIRE(scratch2.Arena == scratch1.Arena);
+            REQUIRE(scratch3.Arena == scratch1.Arena);
         }
 
-        // Three levels of nesting all get their own arena.
+        // Inner scopes restore only their own pushes; the outer data survives them.
         {
             auto scratch1 = Arena::GetScratch();
-            auto scratch2 = Arena::GetScratch();
-            ScratchArena scratch3 = Arena::GetScratch();
-            REQUIRE(scratch1.Arena != scratch2.Arena);
-            REQUIRE(scratch1.Arena != scratch3.Arena);
-            REQUIRE(scratch2.Arena != scratch3.Arena);
-        }
-
-        // A released lease returns to the pool and is reused by the next request.
-        {
-            Arena* first = nullptr;
+            auto data = scratch1.Arena->Push(64);
+            REQUIRE(data.size() == 64);
+            u64 outer_offset = scratch1.Arena->Offset;
             {
-                auto scratch = Arena::GetScratch();
-                first = scratch.Arena;
+                auto scratch2 = Arena::GetScratch();
+                auto inner = scratch2.Arena->Push(64);
+                REQUIRE(inner.size() == 64);
+                REQUIRE(scratch2.Arena->Offset > outer_offset);
             }
-            auto scratch = Arena::GetScratch();
-            REQUIRE(scratch.Arena == first);
+            REQUIRE(scratch1.Arena->Offset == outer_offset);
+        }
+        REQUIRE(scratch_arenas[0].Offset == 0);
+    }
+
+    SECTION("Conflicts are never returned") {
+        auto scratch_arenas = Arena::ReferenceScratch();
+
+        {
+            auto scratch = Arena::GetScratch(&scratch_arenas[0]);
+            REQUIRE(scratch.Arena == &scratch_arenas[1]);
+        }
+        {
+            auto scratch = Arena::GetScratch(&scratch_arenas[0], &scratch_arenas[1]);
+            REQUIRE(scratch.Arena == &scratch_arenas[2]);
+        }
+        // A conflict deeper in the pool doesn't shift the pick off an earlier free arena.
+        {
+            auto scratch = Arena::GetScratch(&scratch_arenas[1]);
+            REQUIRE(scratch.Arena == &scratch_arenas[0]);
+        }
+        // A non-scratch arena as conflict is harmless (it can never be picked anyway).
+        {
+            Arena other = Arena::Allocate("Other"sv, 4 * KILOBYTE);
+            auto scratch = Arena::GetScratch(&other);
+            REQUIRE(scratch.Arena == &scratch_arenas[0]);
+            Arena::Free(&other);
         }
     }
 
@@ -498,37 +522,37 @@ TEST_CASE("Scratch arena", "[memory]") {
 
         verify_arenas(0, 0, 0, 0);
 
-        // Each nested call leases the next free arena; every level gets its own. Offsets grow
-        // on the way down and are restored (LIFO) as each lease goes out of scope.
+        // Every plain nested call shares arena 0; offsets stack on the way down and are restored
+        // (LIFO) as each scope exits.
         auto fn1 = [&]() {
             auto scratch = Arena::GetScratch();
-            REQUIRE(scratch.Arena == &scratch_arenas[3]);
+            REQUIRE(scratch.Arena == &scratch_arenas[0]);
 
             auto result = scratch.Arena->Push(1024);
             REQUIRE(result.size() == 1024);
-            verify_arenas(1024, 1024, 1024, 1024);
+            verify_arenas(4096, 0, 0, 0);
         };
 
         auto fn2 = [&]() {
             auto scratch = Arena::GetScratch();
-            REQUIRE(scratch.Arena == &scratch_arenas[2]);
+            REQUIRE(scratch.Arena == &scratch_arenas[0]);
 
             auto result = scratch.Arena->Push(1024);
             REQUIRE(result.size() == 1024);
-            verify_arenas(1024, 1024, 1024, 0);
+            verify_arenas(3072, 0, 0, 0);
             fn1();
-            verify_arenas(1024, 1024, 1024, 0);
+            verify_arenas(3072, 0, 0, 0);
         };
 
         auto fn3 = [&]() {
             auto scratch = Arena::GetScratch();
-            REQUIRE(scratch.Arena == &scratch_arenas[1]);
+            REQUIRE(scratch.Arena == &scratch_arenas[0]);
 
             auto result = scratch.Arena->Push(1024);
             REQUIRE(result.size() == 1024);
-            verify_arenas(1024, 1024, 0, 0);
+            verify_arenas(2048, 0, 0, 0);
             fn2();
-            verify_arenas(1024, 1024, 0, 0);
+            verify_arenas(2048, 0, 0, 0);
         };
 
         {

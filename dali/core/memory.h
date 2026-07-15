@@ -23,14 +23,21 @@ constexpr u64 TERABYTE = 1024 * GIGABYTE;
 
 // Arenas ------------------------------------------------------------------------------------------
 
-// Non-copyable, Non-movable RAII style temporary arena.
-// This is meant to be used in the scope of a stack frame only.
+// Non-copyable, Non-movable RAII scope over an arena: remembers the offset on entry and restores it
+// on exit. Also what |Arena::GetScratch| returns, so nested scratch scopes on the SAME arena stack
+// like call frames — each one only rolls back what it pushed. In non-NDEBUG builds the reclaimed
+// range is poisoned (0xDD) on exit, so any use-after-reset reads garbage deterministically instead
+// of silently working until the memory is reused.
+//
+// This is meant to be a call-stack variable ONLY: never move it, store it, or otherwise extend its
+// lifetime past its scope.
 struct ScopedArena {
     Arena* Arena = nullptr;
     u64 OriginalOffset = 0;
 
-    // Implicit converstion to Arena*. Lvalue-qualified so it can't be called on a temporary
-    // (an inline `arena.GetScoped()` would reset at the end of the full expression — useless).
+    // Implicit conversion to Arena*. Lvalue-qualified so it can't be called on a temporary:
+    // `Printf(Arena::GetScratch(), ...)` is a use-after-reset bug, so make it a compile error.
+    // Bind the scope to a named variable first: `auto s = Arena::GetScratch(); Printf(s, ...)`.
     operator struct Arena *() & { return Arena; }
 
     explicit ScopedArena(struct Arena* arena, u64 original_offset);
@@ -41,32 +48,6 @@ struct ScopedArena {
 
     ScopedArena(ScopedArena&&) = delete;
     ScopedArena& operator=(ScopedArena&&) = delete;
-};
-
-// RAII lease over one of the global scratch arenas (see |Arena::GetScratch|).
-// While alive it marks its arena as in-use, so any nested GetScratch() is guaranteed
-// to hand out a *different* arena. On destruction it resets the arena's offset and
-// releases it back to the pool.
-//
-// This is meant to be a call-stack variable ONLY: never move it, store it, or otherwise
-// extend its lifetime past its scope, or the arena stays leased and leaks out of the pool.
-struct ScratchArena {
-    Arena* Arena = nullptr;
-    u64 OriginalOffset = 0;
-
-    // Implicit conversion to Arena*. Lvalue-qualified so it can't be called on a temporary:
-    // `Printf(Arena::GetScratch(), ...)` is a use-after-reset bug, so make it a compile error.
-    // Bind the lease to a named variable first: `auto s = Arena::GetScratch(); Printf(s, ...)`.
-    operator struct Arena *() & { return Arena; }
-
-    explicit ScratchArena(struct Arena* arena);
-    ~ScratchArena();
-
-    ScratchArena(const ScratchArena&) = delete;
-    ScratchArena& operator=(const ScratchArena&) = delete;
-
-    ScratchArena(ScratchArena&&) = delete;
-    ScratchArena& operator=(ScratchArena&&) = delete;
 };
 
 struct Arena {
@@ -85,15 +66,17 @@ struct Arena {
 
     Arena* ParentArena = nullptr;
 
-    // True while this arena is leased out as a scratch arena (see |ScratchArena|).
-    bool _InUse = false;
-
     static Arena Allocate(StringView name, u64 size);
     static void Free(Arena* arena);
 
-    // Leases a scratch arena that is not currently in use by any live ScratchArena.
-    // The lease keeps it reserved for its lifetime, so nested calls never collide.
-    static ScratchArena GetScratch();
+    // Returns a scoped lease over one of the global scratch arenas. Nested calls SHARE arenas:
+    // the scope restores the offset on exit, so same-arena nesting stacks safely (LIFO) and depth
+    // is unbounded. A conflict is an arena the scratch must NOT be — a function that allocates
+    // results into a parameter arena while also holding a scratch MUST pass that parameter as a
+    // conflict, or the scratch may be that very arena and its scope-exit reset would reclaim the
+    // results just returned.
+    static ScopedArena GetScratch(const Arena* conflict1 = nullptr,
+                                  const Arena* conflict2 = nullptr);
 
     // Use for testing.
     static std::span<Arena> ReferenceScratch();

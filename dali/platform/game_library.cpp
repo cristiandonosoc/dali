@@ -53,7 +53,7 @@ GameLibrary GameLibrary::Create(StringView dll_path) {
 bool GameLibrary::Load(PlatformState* ps, bool is_reload) {
     ASSERT(!Path.IsEmpty());
 
-    ScratchArena scratch = Arena::GetScratch();
+    auto scratch = Arena::GetScratch();
 
     // Loaded copies go to <dir of Path>/loaded_game_dlls (created on demand), not beside the
     // original DLL, so they stay corralled in one sweepable place instead of cluttering the game

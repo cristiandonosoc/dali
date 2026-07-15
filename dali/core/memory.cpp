@@ -11,15 +11,13 @@ namespace memory_private {
 
 static constexpr u32 kScratchArenaSize = 32 * MEGABYTE;
 
-Array<StringView, 8> kScratchArenaNames = {
+// Scratch scopes stack on a shared arena (see Arena::GetScratch), so the pool only needs to cover
+// conflict skipping (max 2 conflicts + 1) — not call depth. 4 gives headroom.
+Array<StringView, 4> kScratchArenaNames = {
     "ScratchArena0"sv,
     "ScratchArena1"sv,
     "ScratchArena2"sv,
     "ScratchArena3"sv,
-    "ScratchArena4"sv,
-    "ScratchArena5"sv,
-    "ScratchArena6"sv,
-    "ScratchArena7"sv,
 };
 
 void* AllocMemory(Arena* arena, u64 size) {
@@ -70,7 +68,9 @@ void Arena::Free(Arena* arena) {
 }
 
 Arena Arena::Carve(StringView name, u64 size) {
-    auto scratch = Arena::GetScratch();
+    // |this| is a conflict: the carved block is pushed into this arena, and if the scratch were
+    // this same arena its scope-exit reset would reclaim that block.
+    auto scratch = Arena::GetScratch(this);
     StringView out_name = Printf(scratch, "%s:%s", Name.Str(), name.Str());
 
     Arena out = {
@@ -107,7 +107,7 @@ std::span<u8> Arena::PushZero(u64 size, u64 alignment) {
 
 std::span<Arena> Arena::ReferenceScratch() {
     using namespace memory_private;
-    constexpr i32 kScratchArenaCount = 8;
+    constexpr i32 kScratchArenaCount = 4;
     static_assert(kScratchArenaCount <= (i32)kScratchArenaNames.Size,
                   "Not enough scratch arena names");
     static bool gInitialized = false;
@@ -130,32 +130,32 @@ ScopedArena::ScopedArena(struct Arena* arena, u64 original_offset)
 
 ScopedArena::~ScopedArena() {
     ASSERTF(Arena, "No weird shenanigans with arenas!");
+#ifndef NDEBUG
+    // Poison the reclaimed range so any pointer kept past this scope (e.g. a missed GetScratch
+    // conflict) reads 0xDD deterministically instead of stale-but-valid data.
+    std::memset(Arena->Start + OriginalOffset, 0xDD, Arena->Offset - OriginalOffset);
+#endif  // NDEBUG
     Arena->Offset = OriginalOffset;
 }
 
-ScratchArena::ScratchArena(struct Arena* arena) : Arena(arena), OriginalOffset(arena->Offset) {
-    Arena->_InUse = true;
-}
-
-ScratchArena::~ScratchArena() {
-    ASSERTF(Arena, "No weird shenanigans with arenas!");
-    Arena->Offset = OriginalOffset;
-    Arena->_InUse = false;
-}
-
-ScratchArena Arena::GetScratch() {
+ScopedArena Arena::GetScratch(const Arena* conflict1, const Arena* conflict2) {
     auto scratch_arenas = Arena::ReferenceScratch();
 
-    // Hand out the first scratch arena that isn't already leased. The lease (ScratchArena)
-    // keeps it marked in-use for its lifetime, so nested GetScratch() calls never collide.
+    // Hand out the first arena that isn't a conflict. Plain (conflict-less) calls all share the
+    // first arena: the scope restores the offset on exit, so nesting stacks safely and depth is
+    // unbounded by the pool size.
     for (Arena& a : scratch_arenas) {
-        if (!a._InUse) {
-            return ScratchArena(&a);
+        if (&a == conflict1) {
+            continue;
         }
+        if (&a == conflict2) {
+            continue;
+        }
+        return a.GetScoped();
     }
 
     ASSERTF(false, "No scratch arena could be found");
-    return ScratchArena(&scratch_arenas[0]);
+    return scratch_arenas[0].GetScoped();
 }
 
 // BLOCK ARENA MANAGER -----------------------------------------------------------------------------

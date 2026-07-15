@@ -83,7 +83,8 @@ StringView GetExtension(Arena* arena, StringView path) {
 }
 
 StringView RemoveExtension(Arena* arena, StringView path) {
-    auto scratch = Arena::GetScratch();
+    // |arena| receives the result below, so it must not also be the scratch.
+    auto scratch = Arena::GetScratch(arena);
     StringView extension = GetExtension(scratch, path);
     if (extension.IsEmpty()) {
         return path;
@@ -104,7 +105,8 @@ StringView ChangeExtension(Arena* arena, StringView original, StringView new_ext
     }
 
     ASSERT(new_ext.Str()[0] == '.');
-    auto scratch = Arena::GetScratch();
+    // |arena| receives the result below, so it must not also be the scratch.
+    auto scratch = Arena::GetScratch(arena);
 
     StringView clean = RemoveExtension(scratch, original);
     return Concat(arena, clean, new_ext);

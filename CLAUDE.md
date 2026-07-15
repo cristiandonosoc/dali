@@ -54,6 +54,11 @@ bazel build //...     # build without running tests
 - `g` prefix on globals (`gRunningInTest`)
 - X macros used heavily for type registration (entity types, component types, asset types)
 - Arena-based allocation — prefer `Arena*` + member methods (e.g. `arena->Push`) over `new`/`delete`
+- Scratch conflicts: `Arena::GetScratch()` hands out shared arenas (nested scopes stack on the same
+  one). A function that allocates **results** into a parameter arena while holding a scratch MUST
+  pass that parameter as a conflict — `Arena::GetScratch(arena)` — or the scratch may be that very
+  arena and its scope-exit reset reclaims the results. Greppable rule: any function with an `Arena*`
+  parameter and a `GetScratch` call in its body needs the parameter declared as a conflict.
 - No comments unless the WHY is non-obvious
 - No exceptions. The project is built without exception support, so never use `try` / `catch` /
   `throw`. Signal failure with a return value (bool, sentinel, `std::optional`). When a third-party
@@ -146,8 +151,7 @@ separately.
 | `StringView` | Non-owning string (`const char*` + size). Use `Str()` for C API calls — never returns null. Distinguished `IsValid()` (non-null ptr) vs `IsEmpty()` (zero size). |
 | `FixedString<N>` | Stack-owned null-terminated string with fixed capacity. Used for names stored in structs. |
 | `Arena` | Linear allocator. Member methods `Push`, `PushZero`, `PushArray`; static `Allocate`/`Free`/`GetScratch`. |
-| `ScopedArena` | RAII scope that resets an arena's offset on exit. Get one via `arena.GetScoped()`. |
-| `ScratchArena` | RAII lease over a global scratch arena, from `Arena::GetScratch()`. Marks its arena in-use for its lifetime so nested calls never collide; resets and releases it on exit. Stack-frame only — never move or store it. |
+| `ScopedArena` | RAII scope that restores an arena's offset on exit (debug builds poison the reclaimed range). Get one via `arena.GetScoped()`, or from `Arena::GetScratch(conflicts...)` for a global scratch arena — nested scratch scopes share an arena and stack. Stack-frame only — never move or store it. |
 | `Array<T, N>` | Fixed-size stack array with bounds-checked access. |
 | `FixedVector<T, N>` | Fixed-capacity growable array. |
 
