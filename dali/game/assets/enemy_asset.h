@@ -11,24 +11,31 @@ namespace kdk {
 
 struct AssetRegistry;
 
-// Movement facing, quantized to four directions on a 45 degree cutoff. Default 0 == Down, so a fresh
-// or stationary enemy faces the camera. Values index WalkClips::ByFacing directly.
-enum class EFacing : u8 { Down = 0, Up, Left, Right, COUNT };
+// Movement facing, quantized to four directions on a 45 degree cutoff. Default 0 == Down, so a
+// fresh or stationary enemy faces the camera. Values index WalkClips::ByFacing directly.
+enum class EFacing : u8 {
+    Down = 0,
+    Up,
+    Left,
+    Right,
+    COUNT
+};
 
-// Maps a movement vector to a facing. World Y grows downward (screen convention, see WorldToScreen),
-// so a positive y is Down. The 45 degree cutoff is a magnitude compare; a tie at exactly 45 degrees
-// resolves to the horizontal facing.
+// Maps a movement vector to a facing. World Y grows downward (screen convention, see
+// WorldToScreen), so a positive y is Down. The 45 degree cutoff is a magnitude compare; a tie at
+// exactly 45 degrees resolves to the horizontal facing.
 EFacing FacingFromDir(Vec2 dir);
 
-// One facing's walk animation: which clip, and whether to mirror it horizontally. FlipX is what lets
-// a single side-view clip serve both Left and Right — point both slots at it and flip one.
+// One facing's walk animation: which clip, and whether to mirror it horizontally. FlipX is what
+// lets a single side-view clip serve both Left and Right — point both slots at it and flip one.
 struct DirectionalClip {
     SpriteSheetClipReference Clip = {};
     bool FlipX = false;
 };
 
 // An enemy's walk animation, one slot per facing. A slot may be left unset; drawing a facing whose
-// slot is unset asserts at the draw site (its clip reference resolves to null). No fallback by design.
+// slot is unset asserts at the draw site (its clip reference resolves to null). No fallback by
+// design.
 struct WalkClips {
     Array<DirectionalClip, (i32)EFacing::COUNT> ByFacing = {};
 
@@ -56,7 +63,7 @@ struct EnemyAsset {
         float Damage = 5.0f;      // HP drained from the base on breach
         i32 Reward = 5;           // gold granted when a tower kills it
         Color32 Color = Color32::OrangeRed;  // draw color / sprite tint
-        WalkClips Walk = {};                 // per-facing walk animation; resolved against the registry
+        WalkClips Walk = {};  // per-facing walk animation; resolved against the registry
     };
     InstanceData PerInstanceData = {};
 
@@ -66,6 +73,8 @@ struct EnemyAsset {
     static std::optional<EnemyAsset> LoadFromDisk(AssetId id);
 
     bool SaveManifest() const;
+
+    bool ResolveReferences(AssetRegistry&) { return true; }  // no-op
 };
 
 }  // namespace kdk

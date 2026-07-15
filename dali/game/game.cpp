@@ -2,8 +2,11 @@
 
 #include <dali/core/api.h>
 #include <dali/core/color.h>
+#include <dali/core/filesystem.h>
+#include <dali/core/memory.h>
 #include <dali/game/hex.h>
 #include <dali/game/log.h>
+#include <dali/game/process.h>
 #include <dali/game/scene.h>
 
 #include <imgui.h>
@@ -97,7 +100,8 @@ struct DrawContext {
     Vec2 Origin;
     float Zoom = 1;
     float Time = 0;
-    AssetRegistry* Registry = nullptr;  // for live-resolving asset references at draw
+    AssetRegistry* Registry = nullptr;      // for live-resolving asset references at draw
+    const TowerAsset* DefaultTower = nullptr;  // resolved once/frame; every tower draws its idle clip
 
     DrawContext(ImDrawList* draw_list, const Vec2& origin, float zoom, AssetRegistry* registry)
         : DrawList(draw_list), Origin(origin), Zoom(zoom), Registry(registry) {}
@@ -212,8 +216,34 @@ void DrawTileContent(DrawContext* dc, const Tile& tile, const Hex& hovered) {
         if (tile.Hex == hovered) {
             dc->DrawList->AddCircle(center, kTowerRange * dc->Zoom, Color32::Cyan.Bits, 0, 2.0f);
         }
-        dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::SteelBlue.Bits);
-        dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
+
+        // The tower's idle animation, from its blueprint (resolved once per frame onto the context;
+        // every tower is one type for now, so they share it). Falls back to a placeholder disc when
+        // no blueprint/clip resolves, so an art-less tower is still visible.
+        const SpriteSheetClip* clip = nullptr;
+        if (dc->DefaultTower) {
+            clip = dc->DefaultTower->PerInstanceData.IdleClip.Resolve(*dc->Registry);
+        }
+        i32 pos = NONE;
+        bool drawable = clip != nullptr;
+        if (drawable) {
+            drawable &= clip->_Resolved != nullptr;
+        }
+        if (drawable) {
+            pos = clip->At(dc->Time, clip->FPS, true);
+            drawable &= pos != NONE;
+            drawable &= pos < clip->_Frames.Size;
+        }
+        if (drawable) {
+            FrameUv frameuv = clip->_Frames[pos];
+            ImVec2 uv0 = ToImVec2(frameuv.Uv0);
+            ImVec2 uv1 = ToImVec2(frameuv.Uv1);
+            ImVec2 hsize = ToImVec2((clip->_CellSize * dc->Zoom) / 2.0f);
+            dc->DrawList->AddImage((ImTextureID)clip->_Handle, center - hsize, center + hsize, uv0, uv1);
+        } else {
+            dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::SteelBlue.Bits);
+            dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
+        }
 
         // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
         // visible at a glance.
@@ -247,6 +277,7 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps,
     ImDrawList* _draw_list = ImGui::GetBackgroundDrawList();
     DrawContext dc(_draw_list, origin, zoom, registry);
     dc.Time = ps->TimeTracking.TotalSeconds;
+    dc.DefaultTower = registry->FindTowerAsset(world->DefaultTower);
 
     // // World->screen: the sim is in zoom-independent world units; pixels are origin + world *
     // zoom. auto world_to_screen = [&](Vec2 w) -> ImVec2 {
@@ -741,6 +772,9 @@ void GameInit(PlatformState* ps, GameState* gs) {
     // The blueprint waves spawn until wave-composition exists. If the asset is absent, UpdateWave
     // falls back to a default-stat enemy, so this id being unresolved is not fatal.
     gs->World.DefaultEnemy = AssetId::Normalize("enemies/wolf"sv);
+    // The blueprint every placed tower draws its idle graphics from (behaviour still uses the
+    // kTower* constants). Unresolved is not fatal — the tower falls back to a placeholder disc.
+    gs->World.DefaultTower = AssetId::Normalize("towers/arrow"sv);
 
     printf("[game] GameInit\n");
 }
@@ -784,7 +818,7 @@ void GameUpdate(PlatformState* ps, GameState* gs) {
     // Resolve the wave's enemy blueprint here (the sim is registry-agnostic). Fall back to a
     // default blueprint if the id is missing, so the game still runs before any enemy asset is
     // authored.
-    const EnemyAsset* blueprint = gs->Registry.FindEnemyBlueprint(world.DefaultEnemy);
+    const EnemyAsset* blueprint = gs->Registry.FindEnemyAsset(world.DefaultEnemy);
     EnemyAsset fallback = {};
     world.UpdateWave(dt, blueprint ? *blueprint : fallback);
     world.UpdateEnemies(dt);
@@ -966,6 +1000,54 @@ void TryBuyTower(World* world, Hex hex) {
     MakeTower(tile);
 }
 
+// Rebuilds + restages the game DLL by running reload.bat (which the running platform notices and
+// hot-reloads). Blocks until the build finishes. Returns 0 on success, 1 on failure - stored so the
+// menu can show the outcome, and it survives the reload it triggers.
+i32 RunHotReload() {
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+
+    StringView bat = paths::PathJoin(arena, paths::GetBaseDir(arena), "reload.bat"sv);
+    // A .bat is not directly executable; cmd /c runs it. reload.bat cd's to its own dir (%~dp0), so
+    // no working directory is needed.
+    StringView args[] = {
+        "cmd"sv,
+        "/c"sv,
+        bat,
+    };
+    ProcessResult result = RunProcess(arena, std::span<const StringView>(args));
+
+    bool ok = result.Launched;
+    ok &= (result.ExitCode == 0);
+    return ok ? 0 : 1;
+}
+
+// Draws a tick (ok) or a cross (fail) into a small reserved box on the current line. The default
+// ImGui font has no check/cross glyph, so they are stroked with the draw list.
+void DrawStatusGlyph(bool ok) {
+    float sz = ImGui::GetFontSize();
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(sz, sz));
+
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    float pad = sz * 0.2f;
+    float thickness = 2.0f;
+    if (ok) {
+        ImU32 col = IM_COL32(60, 200, 90, 255);
+        ImVec2 low(p.x + pad, p.y + sz * 0.55f);
+        ImVec2 mid(p.x + sz * 0.42f, p.y + sz - pad);
+        ImVec2 high(p.x + sz - pad, p.y + pad);
+        draw->AddLine(low, mid, col, thickness);
+        draw->AddLine(mid, high, col, thickness);
+    } else {
+        ImU32 col = IM_COL32(220, 70, 70, 255);
+        ImVec2 tl(p.x + pad, p.y + pad);
+        ImVec2 br(p.x + sz - pad, p.y + sz - pad);
+        draw->AddLine(tl, br, col, thickness);
+        draw->AddLine(ImVec2(br.x, tl.y), ImVec2(tl.x, br.y), col, thickness);
+    }
+}
+
 // Draws the top menu bar and lets the user switch app modes. Returns the bar's height so the views
 // below can dock beneath it instead of under it.
 float DrawMainMenuBar(GameState* gs) {
@@ -978,6 +1060,25 @@ float DrawMainMenuBar(GameState* gs) {
                 gs->AppMode = mode;
             }
         }
+
+        // Right-aligned "Hot Reload" button + last-result glyph.
+        ImGuiStyle& style = ImGui::GetStyle();
+        const char* label = "Hot Reload";
+        float glyph_w = 0.0f;
+        if (gs->HotReloadResult != NONE) {
+            glyph_w = ImGui::GetFontSize() + style.ItemSpacing.x;
+        }
+        float block_w = ImGui::CalcTextSize(label).x + style.ItemSpacing.x * 2.0f + glyph_w +
+                        style.WindowPadding.x;
+        ImGui::SameLine(ImGui::GetWindowWidth() - block_w);
+        if (ImGui::MenuItem(label)) {
+            gs->HotReloadResult = RunHotReload();
+        }
+        if (gs->HotReloadResult != NONE) {
+            ImGui::SameLine();
+            DrawStatusGlyph(gs->HotReloadResult == 0);
+        }
+
         ImGui::EndMainMenuBar();
     }
     return height;
@@ -1154,7 +1255,7 @@ void GameRender(PlatformState* ps, GameState* gs) {
         // Drop one enemy on the first spawn source, to test firing without waiting on a wave.
         if (ImGui::Button("Spawn Enemy")) {
             if (!world.SpawnSources.IsEmpty()) {
-                const EnemyAsset* blueprint = gs->Registry.FindEnemyBlueprint(world.DefaultEnemy);
+                const EnemyAsset* blueprint = gs->Registry.FindEnemyAsset(world.DefaultEnemy);
                 EnemyAsset fallback = {};
                 world.SpawnEnemy(blueprint ? *blueprint : fallback, world.SpawnSources[0]);
             }

@@ -56,6 +56,7 @@ StringView ToString(EAssetType type) {
         case EAssetType::Texture: return "texture"sv;
         case EAssetType::SpriteSheet: return "spritesheet"sv;
         case EAssetType::Enemy: return "enemy"sv;
+        case EAssetType::Tower: return "tower"sv;
         case EAssetType::COUNT: break;
     }
     ASSERT(false);
@@ -72,6 +73,9 @@ EAssetType AssetTypeFromString(StringView str) {
     if (str == "enemy"sv) {
         return EAssetType::Enemy;
     }
+    if (str == "tower"sv) {
+        return EAssetType::Tower;
+    }
     return EAssetType::Invalid;
 }
 
@@ -82,6 +86,7 @@ StringView IdRootForType(EAssetType type) {
         case EAssetType::Texture: return "textures"sv;
         case EAssetType::SpriteSheet: return "spritesheets"sv;
         case EAssetType::Enemy: return "enemies"sv;
+        case EAssetType::Tower: return "towers"sv;
         case EAssetType::Invalid:
         case EAssetType::COUNT: break;
     }

@@ -55,24 +55,23 @@ void CrawlDir(AssetRegistry* registry, Arena* arena, StringView abs_dir, StringV
         if (!PeekManifest(id, &header)) {
             continue;
         }
+
+#define X(ASSET_NAME, ...)                     \
+    case EAssetType::ASSET_NAME: {             \
+        registry->Load##ASSET_NAME##Asset(id); \
+        break;                                 \
+    }
+
         switch (header.Type) {
-            case EAssetType::Texture: {
-                registry->LoadTexture(id);
-                break;
-            }
-            case EAssetType::SpriteSheet: {
-                registry->LoadSpriteSheet(id);
-                break;
-            }
-            case EAssetType::Enemy: {
-                registry->LoadEnemyBlueprint(id);
-                break;
-            }
+            XASSET_TYPES(X)
+
             default: {
                 LogWarning("AssetRegistry: unknown asset type in '%s'", id.Value.Str());
                 break;
             }
         }
+
+#undef X
     }
 }
 
@@ -107,19 +106,28 @@ void AssetRegistry::CrawlAndLoad() {
 
 void AssetRegistry::ResolveReferences() {
     // Orchestration only: each asset knows its own references and resolves them against us.
-    for (SpriteSheetAsset& asset : SpriteSheetAssets) {
-        asset.ResolveReferences(*this);
+
+#define X(ASSET_NAME, ...)                                \
+    for (ASSET_NAME##Asset& asset : ASSET_NAME##Assets) { \
+        asset.ResolveReferences(*this);                   \
     }
-    // Enemy blueprints hold a SpriteSheetClipReference resolved live at draw, so nothing to link here.
+
+    XASSET_TYPES(X);
+
+    // for (SpriteSheetAsset& asset : SpriteSheetAssets) {
+    //     asset.ResolveReferences(*this);
+    // }
+
+#undef X
 }
 
-TextureAsset* AssetRegistry::LoadTexture(AssetId id) {
+TextureAsset* AssetRegistry::LoadTextureAsset(AssetId id) {
     std::optional<TextureAsset> loaded = TextureAsset::LoadFromDisk(id);
     if (!loaded) {
         return nullptr;
     }
 
-    if (TextureAsset* existing = FindTexture(id)) {
+    if (TextureAsset* existing = FindTextureAsset(id)) {
         existing->Resource.Destroy();
         *existing = *loaded;
         return existing;
@@ -135,7 +143,7 @@ TextureAsset* AssetRegistry::LoadTexture(AssetId id) {
     return &TextureAssets.Push(*loaded);
 }
 
-TextureAsset* AssetRegistry::FindTexture(AssetId id) {
+TextureAsset* AssetRegistry::FindTextureAsset(AssetId id) {
     for (TextureAsset& tex : TextureAssets) {
         if (tex.Manifest.Id == id) {
             return &tex;
@@ -144,7 +152,7 @@ TextureAsset* AssetRegistry::FindTexture(AssetId id) {
     return nullptr;
 }
 
-SpriteSheetAsset* AssetRegistry::LoadSpriteSheet(AssetId id) {
+SpriteSheetAsset* AssetRegistry::LoadSpriteSheetAsset(AssetId id) {
     std::optional<SpriteSheetAsset> loaded = SpriteSheetAsset::LoadFromDisk(id);
     if (!loaded) {
         return nullptr;
@@ -152,7 +160,7 @@ SpriteSheetAsset* AssetRegistry::LoadSpriteSheet(AssetId id) {
 
     // Does not resolve the texture reference here — the caller runs ResolveReferences once all
     // assets are present (during a crawl the referenced texture may not be loaded yet).
-    if (SpriteSheetAsset* existing = FindSpriteSheet(id)) {
+    if (SpriteSheetAsset* existing = FindSpriteSheetAsset(id)) {
         *existing = *loaded;
         return existing;
     }
@@ -166,7 +174,7 @@ SpriteSheetAsset* AssetRegistry::LoadSpriteSheet(AssetId id) {
     return &SpriteSheetAssets.Push(*loaded);
 }
 
-SpriteSheetAsset* AssetRegistry::FindSpriteSheet(AssetId id) {
+SpriteSheetAsset* AssetRegistry::FindSpriteSheetAsset(AssetId id) {
     for (SpriteSheetAsset& sheet : SpriteSheetAssets) {
         if (sheet.Manifest.Id == id) {
             return &sheet;
@@ -175,13 +183,13 @@ SpriteSheetAsset* AssetRegistry::FindSpriteSheet(AssetId id) {
     return nullptr;
 }
 
-EnemyAsset* AssetRegistry::LoadEnemyBlueprint(AssetId id) {
+EnemyAsset* AssetRegistry::LoadEnemyAsset(AssetId id) {
     std::optional<EnemyAsset> loaded = EnemyAsset::LoadFromDisk(id);
     if (!loaded) {
         return nullptr;
     }
 
-    if (EnemyAsset* existing = FindEnemyBlueprint(id)) {
+    if (EnemyAsset* existing = FindEnemyAsset(id)) {
         *existing = *loaded;
         return existing;
     }
@@ -195,8 +203,37 @@ EnemyAsset* AssetRegistry::LoadEnemyBlueprint(AssetId id) {
     return &EnemyAssets.Push(*loaded);
 }
 
-EnemyAsset* AssetRegistry::FindEnemyBlueprint(AssetId id) {
+EnemyAsset* AssetRegistry::FindEnemyAsset(AssetId id) {
     for (EnemyAsset& enemy : EnemyAssets) {
+        if (enemy.Manifest.Id == id) {
+            return &enemy;
+        }
+    }
+    return nullptr;
+}
+
+TowerAsset* AssetRegistry::LoadTowerAsset(AssetId id) {
+    std::optional<TowerAsset> loaded = TowerAsset::LoadFromDisk(id);
+    if (!loaded) {
+        return nullptr;
+    }
+
+    if (TowerAsset* existing = FindTowerAsset(id)) {
+        *existing = *loaded;
+        return existing;
+    }
+
+    if (TowerAssets.IsFull()) {
+        LogError("AssetRegistry: enemy capacity (%d) reached, dropping '%s'",
+                 kMaxTowerAssets,
+                 id.Value.Str());
+        return nullptr;
+    }
+    return &TowerAssets.Push(*loaded);
+}
+
+TowerAsset* AssetRegistry::FindTowerAsset(AssetId id) {
+    for (TowerAsset& enemy : TowerAssets) {
         if (enemy.Manifest.Id == id) {
             return &enemy;
         }

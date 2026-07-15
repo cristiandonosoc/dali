@@ -34,6 +34,7 @@ struct AssetEditor {
     FixedString<64> TextureFilter = {};
     FixedString<64> SheetFilter = {};
     FixedString<64> EnemyFilter = {};
+    FixedString<64> TowerFilter = {};
 
     // Texture creation form scratch. The id is the short, root-relative form (the "textures/" root
     // is prepended on create); Source stays a full raw path.
@@ -63,6 +64,9 @@ struct AssetEditor {
     // Enemy creation form scratch: the short id (root prepended on create); stats edited in the
     // inspector.
     FixedString<128> NewEnemyId = "goblin";
+    // Tower creation form scratch: the short id (root prepended on create); stats edited in the
+    // inspector.
+    FixedString<128> NewTowerId = "arrow";
     // New-clip form scratch (a clip carries its own texture + grid; both edited in the inspector).
     FixedString<64> NewClipName = {};
     AssetId NewClipTexture = {};
@@ -102,6 +106,7 @@ struct AssetEditor {
     void DrawTextureBatchView(AssetRegistry* registry);
     void DrawSpriteSheetTab(AssetRegistry* registry);
     void DrawEnemyTab(AssetRegistry* registry);
+    void DrawTowerTab(AssetRegistry* registry);
 };
 
 }  // namespace kdk

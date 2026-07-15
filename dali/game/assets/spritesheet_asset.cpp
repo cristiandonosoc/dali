@@ -42,7 +42,7 @@ GridDims ComputeGridDims(const SpriteGrid& grid, i32 tex_w, i32 tex_h) {
 }  // namespace spritesheet_asset_private
 
 bool SpriteSheetClip::Resolve(AssetRegistry& registry) {
-    _Resolved = registry.FindTexture(Texture);
+    _Resolved = registry.FindTextureAsset(Texture);
     _Handle = 0;
     _CellSize = {};
     _Frames.Clear();
@@ -253,7 +253,7 @@ const SpriteSheetClip* SpriteSheetClipReference::Resolve(AssetRegistry& registry
     if (!SpriteSheetId.IsValid()) {
         return nullptr;
     }
-    SpriteSheetAsset* sheet = registry.FindSpriteSheet(SpriteSheetId);
+    SpriteSheetAsset* sheet = registry.FindSpriteSheetAsset(SpriteSheetId);
     if (!sheet) {
         return nullptr;
     }

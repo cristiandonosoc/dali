@@ -1,0 +1,12 @@
+type: tower
+version: 1
+id: towers/arrow
+instance:
+  range: 180
+  fire_interval: 2
+  damage: 5
+  projectile_hit_radius: 8
+  cost: 40
+idle:
+  sprite_sheet: spritesheets/towers/archer
+  clip: idle_4

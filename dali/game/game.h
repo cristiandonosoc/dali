@@ -145,6 +145,10 @@ struct World {
     // exists. Set in GameInit; resolved against the registry by the caller, which passes the
     // blueprint into UpdateWave (the sim stays registry-agnostic).
     AssetId DefaultEnemy = {};
+    // The tower blueprint every placed tower draws from. Graphics only for now (its idle clip);
+    // gameplay still runs off the kTower* constants, so behaviour is unchanged. Set in GameInit,
+    // resolved against the registry at draw time (the sim stays registry-agnostic).
+    AssetId DefaultTower = {};
     FixedVector<Projectile, kMaxProjectiles> Projectiles = {};
 
     Wave Wave = {};
@@ -252,6 +256,10 @@ struct GameState {
 
     World World = {};
     int InternalDetectedReload = 0;
+
+    // Last "Hot Reload" menu-button result: NONE = not run yet, 0 = success (tick), 1 = failure (x).
+    // Survives the DLL reload it triggers because GameState lives in the PermanentArena.
+    i32 HotReloadResult = NONE;
 
     // Assets view: the loaded asset set and the editor's transient UI state. The registry is a
     // self-contained value blob living here in the PermanentArena, so it survives DLL reloads.

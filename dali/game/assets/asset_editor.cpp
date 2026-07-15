@@ -85,6 +85,8 @@ std::span<const AssetId*>
             return SortedFilteredIds(arena, registry->SpriteSheetAssets, type, filter);
         case EAssetType::Enemy:
             return SortedFilteredIds(arena, registry->EnemyAssets, type, filter);
+        case EAssetType::Tower:
+            return SortedFilteredIds(arena, registry->TowerAssets, type, filter);
         case EAssetType::Invalid:
         case EAssetType::COUNT: break;
     }
@@ -349,7 +351,7 @@ void ImportBatch(AssetEditor* editor, AssetRegistry* registry) {
         StringView source =
             ForwardSlashes(arena, Printf(arena, "%s/%s", editor->BatchFolder.Str(), name.Str()));
         if (TextureAsset::Import(source, id, settings, editor->BatchFilter)) {
-            registry->LoadTexture(id);
+            registry->LoadTextureAsset(id);
             if (ok == 0) {
                 first = id;
             }
@@ -886,14 +888,17 @@ namespace asset_editor_private {
 // nullptr if no loaded asset has that id. The per-holder scan is the same friction a generic
 // asset-type table would collapse; fine at three types.
 const AssetManifest* FindManifest(AssetRegistry* registry, AssetId id) {
-    if (TextureAsset* tex = registry->FindTexture(id)) {
+    if (TextureAsset* tex = registry->FindTextureAsset(id)) {
         return &tex->Manifest;
     }
-    if (SpriteSheetAsset* sheet = registry->FindSpriteSheet(id)) {
+    if (SpriteSheetAsset* sheet = registry->FindSpriteSheetAsset(id)) {
         return &sheet->Manifest;
     }
-    if (EnemyAsset* enemy = registry->FindEnemyBlueprint(id)) {
+    if (EnemyAsset* enemy = registry->FindEnemyAsset(id)) {
         return &enemy->Manifest;
+    }
+    if (TowerAsset* tower = registry->FindTowerAsset(id)) {
+        return &tower->Manifest;
     }
     return nullptr;
 }
@@ -1185,7 +1190,7 @@ void DrawDirectionalClipPicker(const char* label,
         ref.ClipName = {};  // the previous clip belonged to the old sheet
     }
 
-    SpriteSheetAsset* sheet = registry->FindSpriteSheet(ref.SpriteSheetId);
+    SpriteSheetAsset* sheet = registry->FindSpriteSheetAsset(ref.SpriteSheetId);
     const char* clip_preview = ref.ClipName.IsEmpty() ? "(choose clip)" : ref.ClipName.Str();
     if (ImGui::BeginCombo("Clip", clip_preview)) {
         if (sheet) {
@@ -1278,6 +1283,83 @@ void DrawEnemyInspector(AssetEditor* editor, EnemyAsset* enemy, AssetRegistry* r
     }
 }
 
+// Picks the sprite sheet + clip for a lone clip reference (no mirror), with a small running thumbnail
+// synced to |time|. Like DrawDirectionalClipPicker but for a plain SpriteSheetClipReference — e.g. a
+// tower's idle animation, which has no facing or flip. |label| titles the block and scopes the ids.
+void DrawClipReferencePicker(const char* label,
+                             SpriteSheetClipReference* ref,
+                             AssetRegistry* registry,
+                             float time,
+                             float zoom) {
+    ImGui::PushID(label);
+    ImGui::SeparatorText(label);
+
+    if (AssetSelector("Sheet", EAssetType::SpriteSheet, registry, &ref->SpriteSheetId)) {
+        ref->ClipName = {};  // the previous clip belonged to the old sheet
+    }
+
+    SpriteSheetAsset* sheet = registry->FindSpriteSheetAsset(ref->SpriteSheetId);
+    const char* clip_preview = ref->ClipName.IsEmpty() ? "(choose clip)" : ref->ClipName.Str();
+    if (ImGui::BeginCombo("Clip", clip_preview)) {
+        if (sheet) {
+            for (SpriteSheetClip& clip : sheet->Clips) {
+                bool selected = clip.Name == ref->ClipName;
+                if (ImGui::Selectable(clip.Name.Str(), selected)) {
+                    ref->ClipName = clip.Name;
+                }
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    const SpriteSheetClip* resolved = ref->Resolve(*registry);
+    bool baked = resolved != nullptr;
+    if (baked) {
+        baked &= resolved->_Resolved != nullptr;
+    }
+    if (baked) {
+        i32 pos = resolved->At(time, resolved->FPS, true);
+        bool has_frame = pos != NONE;
+        if (has_frame) {
+            has_frame &= pos < resolved->_Frames.Size;
+        }
+        if (has_frame) {
+            FrameUv uv = resolved->_Frames[pos];
+            ImVec2 uv0(uv.Uv0.x, uv.Uv0.y);
+            ImVec2 uv1(uv.Uv1.x, uv.Uv1.y);
+            ImVec2 draw_size(resolved->_CellSize.x * zoom, resolved->_CellSize.y * zoom);
+            ImGui::Image((ImTextureID)resolved->_Handle, draw_size, uv0, uv1);
+        }
+    } else if (ref->SpriteSheetId.IsValid()) {
+        ImGui::TextDisabled("unresolved");
+    }
+    ImGui::PopID();
+}
+
+void DrawTowerInspector(AssetEditor* editor, TowerAsset* tower, AssetRegistry* registry) {
+    ImGui::Text("Id: %s", tower->Manifest.Id.Value.Str());
+    ImGui::Separator();
+
+    // Advance the shared preview clock once so the idle thumbnail animates.
+    editor->PreviewTime += ImGui::GetIO().DeltaTime;
+
+    TowerAsset::InstanceData& data = tower->PerInstanceData;
+    ImGui::DragFloat("Range", &data.Range, 1.0f, 0.0f, 100000.0f);
+    ImGui::DragFloat("Fire Interval", &data.FireInterval, 0.05f, 0.0f, 100000.0f, "%.2f s");
+    ImGui::DragFloat("Damage", &data.Damage, 0.5f, 0.0f, 100000.0f);
+    ImGui::DragFloat("Projectile Hit Radius", &data.ProjectileHitRadius, 0.5f, 0.0f, 100000.0f);
+    ImGui::DragInt("Cost", &data.Cost, 1.0f, 0, 100000);
+
+    // Idle animation: a single clip played while the tower waits (no facing, no mirror).
+    DrawClipReferencePicker("Idle", &data.IdleClip, registry, editor->PreviewTime, editor->PreviewZoom);
+    ImGui::SliderFloat("Zoom##idle", &editor->PreviewZoom, 0.5f, 16.0f, "%.1fx");
+
+    ImGui::Separator();
+    if (ImGui::Button("Save")) {
+        tower->SaveManifest();
+    }
+}
+
 }  // namespace asset_editor_private
 
 void AssetEditor::Draw(AssetRegistry* registry) {
@@ -1296,6 +1378,10 @@ void AssetEditor::Draw(AssetRegistry* registry) {
         }
         case EAssetType::Enemy: {
             DrawEnemyTab(registry);
+            break;
+        }
+        case EAssetType::Tower: {
+            DrawTowerTab(registry);
             break;
         }
         default: {
@@ -1347,6 +1433,11 @@ void AssetEditor::DrawDatabaseTab(AssetRegistry* registry) {
     ImGui::SeparatorText("Enemies");
     for (const AssetId* id : SortedFilteredIds(scratch, registry->EnemyAssets, EAssetType::Enemy, filter)) {
         DrawDatabaseRow(this, EAssetType::Enemy, *id);
+    }
+
+    ImGui::SeparatorText("Towers");
+    for (const AssetId* id : SortedFilteredIds(scratch, registry->TowerAssets, EAssetType::Tower, filter)) {
+        DrawDatabaseRow(this, EAssetType::Tower, *id);
     }
 
     ImGui::EndChild();
@@ -1409,7 +1500,7 @@ void AssetEditor::DrawTextureListView(AssetRegistry* registry) {
         TextureImportSettings settings = {};
         settings.FlipVertically = NewFlip;
         if (TextureAsset::Import(NewSource.ToString(), normalized, settings, NewFilter)) {
-            registry->LoadTexture(normalized);
+            registry->LoadTextureAsset(normalized);
             Selected = normalized;
         }
     }
@@ -1438,7 +1529,7 @@ void AssetEditor::DrawTextureListView(AssetRegistry* registry) {
 
     // Inspector pane.
     ImGui::BeginChild("inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
-    if (TextureAsset* tex = registry->FindTexture(Selected)) {
+    if (TextureAsset* tex = registry->FindTextureAsset(Selected)) {
         DrawInspector(this, tex);
     } else {
         ImGui::TextWrapped("Select a texture, or create one above.");
@@ -1508,7 +1599,7 @@ void AssetEditor::DrawTextureBatchView(AssetRegistry* registry) {
         if (dup) {
             tag = "dup - skipped";
         } else {
-            bool exists = registry->FindTexture(id) != nullptr;
+            bool exists = registry->FindTextureAsset(id) != nullptr;
             tag = exists ? "exists (re-import)" : "new";
             seen.Push(id);
             importable++;
@@ -1554,7 +1645,7 @@ void AssetEditor::DrawSpriteSheetTab(AssetRegistry* registry) {
 
     if (ImGui::Button("Create")) {
         if (SpriteSheetAsset::Create(normalized)) {
-            registry->LoadSpriteSheet(normalized);
+            registry->LoadSpriteSheetAsset(normalized);
             registry->ResolveReferences();
             Selected = normalized;
         }
@@ -1584,7 +1675,7 @@ void AssetEditor::DrawSpriteSheetTab(AssetRegistry* registry) {
 
     // Inspector pane.
     ImGui::BeginChild("sheet_inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
-    if (SpriteSheetAsset* sheet = registry->FindSpriteSheet(Selected)) {
+    if (SpriteSheetAsset* sheet = registry->FindSpriteSheetAsset(Selected)) {
         DrawSpriteSheetInspector(this, registry, sheet);
     } else {
         ImGui::TextWrapped("Select a spritesheet, or create one above.");
@@ -1604,7 +1695,7 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
 
     if (ImGui::Button("Create")) {
         if (EnemyAsset::Create(normalized)) {
-            registry->LoadEnemyBlueprint(normalized);
+            registry->LoadEnemyAsset(normalized);
             Selected = normalized;
         }
     }
@@ -1633,10 +1724,59 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
 
     // Inspector pane.
     ImGui::BeginChild("enemy_inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
-    if (EnemyAsset* enemy = registry->FindEnemyBlueprint(Selected)) {
+    if (EnemyAsset* enemy = registry->FindEnemyAsset(Selected)) {
         DrawEnemyInspector(this, enemy, registry);
     } else {
         ImGui::TextWrapped("Select an enemy, or create one above.");
+    }
+    ImGui::EndChild();
+}
+
+void AssetEditor::DrawTowerTab(AssetRegistry* registry) {
+    using namespace asset_editor_private;
+
+    // Creation form: a blueprint is created from just its id; stats are edited in the inspector.
+    ImGui::SeparatorText("Create Tower");
+
+    InputTextFixed("Output id", NewTowerId);
+    AssetId normalized = AssetIdFromShort(EAssetType::Tower, NewTowerId.ToString());
+    ImGui::TextDisabled("-> %s", normalized.Value.Str());
+
+    if (ImGui::Button("Create")) {
+        if (TowerAsset::Create(normalized)) {
+            registry->LoadTowerAsset(normalized);
+            Selected = normalized;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Rescan assets/")) {
+        registry->CrawlAndLoad();
+    }
+
+    ImGui::Separator();
+
+    // List pane.
+    DrawFilterBox("##tower_filter", TowerFilter, 240.0f);
+    ImGui::BeginChild("tower_list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
+    ImGui::TextDisabled("Towers (%d)", registry->TowerAssets.Size);
+    auto scratch = Arena::GetScratch();
+    for (const AssetId* id :
+         SortedFilteredIds(scratch, registry->TowerAssets, EAssetType::Tower, TowerFilter.ToString())) {
+        bool selected = (*id == Selected);
+        if (ImGui::Selectable(ShortId(EAssetType::Tower, *id).Str(), selected)) {
+            Selected = *id;
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    // Inspector pane.
+    ImGui::BeginChild("tower_inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+    if (TowerAsset* tower = registry->FindTowerAsset(Selected)) {
+        DrawTowerInspector(this, tower, registry);
+    } else {
+        ImGui::TextWrapped("Select a tower, or create one above.");
     }
     ImGui::EndChild();
 }

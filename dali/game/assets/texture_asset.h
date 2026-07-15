@@ -7,6 +7,8 @@
 
 namespace kdk {
 
+struct AssetRegistry;
+
 // The import-time transforms a texture has. These leave no queryable trace on the GL object (unlike
 // size/channels/filter), so the asset must remember them to re-import. Filter is NOT here: it is
 // live state on the Texture (Resource) and changeable without a re-bake.
@@ -36,15 +38,18 @@ struct TextureAsset {
                        AssetId id,
                        const TextureImportSettings& settings,
                        ETextureFilter filter);
-    // Reads the baked pair for |id| and uploads to the GPU. nullopt if the manifest isn't a texture,
-    // the version mismatches, or a file is missing.
+    // Reads the baked pair for |id| and uploads to the GPU. nullopt if the manifest isn't a
+    // texture, the version mismatches, or a file is missing.
     static std::optional<TextureAsset> LoadFromDisk(AssetId id);
 
     // Rewrites only the .yml (metadata tweak; no re-decode, no re-upload).
     bool SaveManifest() const;
-    // Re-runs Import from Manifest.Source with the current Settings, then reloads in place (replaces
-    // this asset's GPU resource and fields). Use after changing a payload-affecting setting.
+    // Re-runs Import from Manifest.Source with the current Settings, then reloads in place
+    // (replaces this asset's GPU resource and fields). Use after changing a payload-affecting
+    // setting.
     bool Reimport();
+
+    bool ResolveReferences(AssetRegistry&) { return true; }  // no-op
 };
 
 }  // namespace kdk
