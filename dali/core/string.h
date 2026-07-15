@@ -45,6 +45,12 @@ struct StringView {
     bool Equals(const char* str) const;
     bool Equals(const StringView& other) const;
 
+    // Substring search: whether |target| occurs anywhere in this view. An empty target is contained
+    // by everything (matching an empty filter box "matches all"). ContainsCi is the ASCII
+    // case-insensitive variant.
+    bool Contains(const StringView& target) const;
+    bool ContainsCi(const StringView& target) const;
+
     bool operator==(const StringView& other) const { return Equals(other); }
 
     // Subscript operator

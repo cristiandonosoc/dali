@@ -1,5 +1,6 @@
 #include <dali/game/assets/asset_editor.h>
 
+#include <dali/core/algorithm.h>
 #include <dali/core/api.h>
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
@@ -10,6 +11,7 @@
 
 #include <imgui.h>
 
+#include <cfloat>
 #include <cstdio>
 #include <cstring>
 
@@ -34,6 +36,97 @@ bool InputTextFixed(const char* label, FixedString<N>& str) {
     if (changed) {
         str.Size = (u32)std::strlen(str.StrMutable());
     }
+    return changed;
+}
+
+// Collects pointers to the ids in |assets| whose short id contains |filter| (case-insensitive),
+// sorted alphabetically by short id. The pointers alias the registry (stable for the frame); the
+// index array is pushed into |arena|, so the caller MUST keep that arena's scope alive while it
+// iterates the result.
+template <typename T, i32 N>
+std::span<const AssetId*> SortedFilteredIds(Arena* arena,
+                                            FixedVector<T, N>& assets,
+                                            EAssetType type,
+                                            StringView filter) {
+    const AssetId** ids = arena->PushArray<const AssetId*>(assets.Size).data();
+    i32 count = 0;
+    for (T& asset : assets) {
+        StringView short_id = ShortId(type, asset.Manifest.Id);
+        if (!short_id.ContainsCi(filter)) {
+            continue;
+        }
+        ids[count] = &asset.Manifest.Id;
+        count++;
+    }
+    SortPred(ids, ids + count, [type](const AssetId* a, const AssetId* b) {
+        return std::strcmp(ShortId(type, *a).Str(), ShortId(type, *b).Str()) < 0;
+    });
+    return {ids, (u64)count};
+}
+
+// A search box sized to the list column, drawn just above a left list. The hint shows in the empty
+// box; |id| must be unique (a hidden "##..." label) so the four boxes don't collide.
+template <u64 N>
+void DrawFilterBox(const char* id, FixedString<N>& filter, float width) {
+    ImGui::SetNextItemWidth(width);
+    if (ImGui::InputTextWithHint(id, "filter (substring)...", filter.StrMutable(), N)) {
+        filter.Size = (u32)std::strlen(filter.StrMutable());
+    }
+}
+
+// SortedFilteredIds but dispatched by |type| onto the matching registry holder, so a generic (type-
+// erased) picker can list any asset type without knowing the concrete container.
+std::span<const AssetId*>
+    SortedFilteredIdsForType(Arena* arena, AssetRegistry* registry, EAssetType type, StringView filter) {
+    switch (type) {
+        case EAssetType::Texture:
+            return SortedFilteredIds(arena, registry->TextureAssets, type, filter);
+        case EAssetType::SpriteSheet:
+            return SortedFilteredIds(arena, registry->SpriteSheetAssets, type, filter);
+        case EAssetType::Enemy:
+            return SortedFilteredIds(arena, registry->EnemyAssets, type, filter);
+        case EAssetType::Invalid:
+        case EAssetType::COUNT: break;
+    }
+    return {};
+}
+
+// A filterable, alphabetically-sorted picker for one asset type. Renders as a combo whose open popup
+// carries a search box at the top — essential now that a type can hold dozens of assets. Writes the
+// chosen id into |*selected| and returns true if it changed this frame. |label| both titles the combo
+// and scopes its ImGui id (use "Name##uniq" when two pickers of the same type share a window).
+bool AssetSelector(const char* label, EAssetType type, AssetRegistry* registry, AssetId* selected) {
+    const char* preview = selected->IsValid() ? ShortId(type, *selected).Str() : "(none)";
+    if (!ImGui::BeginCombo(label, preview)) {
+        return false;
+    }
+
+    // One static filter buffer is safe: ImGui only ever has a single combo popup open at once. Reset
+    // it (and focus it) when the popup appears, so a query left over from a previous open doesn't
+    // silently hide everything the next time around.
+    static FixedString<64> filter = {};
+    if (ImGui::IsWindowAppearing()) {
+        filter.Set("");
+        ImGui::SetKeyboardFocusHere();
+    }
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::InputTextWithHint("##asset_filter", "filter...", filter.StrMutable(), 64)) {
+        filter.Size = (u32)std::strlen(filter.StrMutable());
+    }
+
+    bool changed = false;
+    auto scratch = Arena::GetScratch();
+    for (const AssetId* id : SortedFilteredIdsForType(scratch, registry, type, filter.ToString())) {
+        bool is_selected = (*id == *selected);
+        if (ImGui::Selectable(ShortId(type, *id).Str(), is_selected)) {
+            *selected = *id;
+            changed = true;
+        }
+        if (is_selected) {
+            ImGui::SetItemDefaultFocus();
+        }
+    }
+    ImGui::EndCombo();
     return changed;
 }
 
@@ -438,18 +531,15 @@ void DrawClipPlayback(AssetEditor* editor, SpriteSheetClip& clip) {
 void DrawClipEditor(AssetEditor* editor, AssetRegistry* registry, SpriteSheetClip& clip) {
     bool dirty = false;
 
-    const char* tex_preview = clip.Texture.IsValid()
-                                  ? ShortId(EAssetType::Texture, clip.Texture).Str()
-                                  : "(choose texture)";
-    if (ImGui::BeginCombo("Texture##CreateClip", tex_preview)) {
-        for (TextureAsset& tex : registry->TextureAssets) {
-            bool selected = tex.Manifest.Id == clip.Texture;
-            if (ImGui::Selectable(ShortId(EAssetType::Texture, tex.Manifest.Id).Str(), selected)) {
-                clip.Texture = tex.Manifest.Id;
-                dirty = true;
-            }
-        }
-        ImGui::EndCombo();
+    if (AssetSelector("Texture##CreateClip", EAssetType::Texture, registry, &clip.Texture)) {
+        dirty = true;
+    }
+    ImGui::SameLine();
+    if (clip._Resolved) {
+        const Texture& res = clip._Resolved->Resource;
+        ImGui::TextDisabled("%d x %d", res.Width, res.Height);
+    } else {
+        ImGui::TextDisabled("(unresolved)");
     }
 
     dirty |= ImGui::InputInt("Cell W", &clip.Grid.CellW);
@@ -502,18 +592,7 @@ void DrawSpriteSheetInspector(AssetEditor* editor,
     // New-clip form: pick a name + a texture from the registry; grid + frames are set in the clip's
     // editor below once it's added.
     InputTextFixed("Name", editor->NewClipName);
-    const char* clip_tex_preview = editor->NewClipTexture.IsValid()
-                                       ? ShortId(EAssetType::Texture, editor->NewClipTexture).Str()
-                                       : "(choose texture)";
-    if (ImGui::BeginCombo("Texture##SelectClip", clip_tex_preview)) {
-        for (TextureAsset& tex : registry->TextureAssets) {
-            bool selected = tex.Manifest.Id == editor->NewClipTexture;
-            if (ImGui::Selectable(ShortId(EAssetType::Texture, tex.Manifest.Id).Str(), selected)) {
-                editor->NewClipTexture = tex.Manifest.Id;
-            }
-        }
-        ImGui::EndCombo();
-    }
+    AssetSelector("Texture##SelectClip", EAssetType::Texture, registry, &editor->NewClipTexture);
 
     bool can_add_clip = !editor->NewClipName.IsEmpty();
     can_add_clip &= editor->NewClipTexture.IsValid();
@@ -874,19 +953,8 @@ void DrawDirectionalClipPicker(const char* label,
     ImGui::SeparatorText(label);
     SpriteSheetClipReference& ref = slot->Clip;
 
-    const char* sheet_preview = ref.SpriteSheetId.IsValid()
-                                    ? ShortId(EAssetType::SpriteSheet, ref.SpriteSheetId).Str()
-                                    : "(none)";
-    if (ImGui::BeginCombo("Sheet", sheet_preview)) {
-        for (SpriteSheetAsset& sheet : registry->SpriteSheetAssets) {
-            bool selected = sheet.Manifest.Id == ref.SpriteSheetId;
-            if (ImGui::Selectable(ShortId(EAssetType::SpriteSheet, sheet.Manifest.Id).Str(),
-                                  selected)) {
-                ref.SpriteSheetId = sheet.Manifest.Id;
-                ref.ClipName = {};
-            }
-        }
-        ImGui::EndCombo();
+    if (AssetSelector("Sheet", EAssetType::SpriteSheet, registry, &ref.SpriteSheetId)) {
+        ref.ClipName = {};  // the previous clip belonged to the old sheet
     }
 
     SpriteSheetAsset* sheet = registry->FindSpriteSheet(ref.SpriteSheetId);
@@ -1028,23 +1096,29 @@ void AssetEditor::DrawDatabaseTab(AssetRegistry* registry) {
     }
     ImGui::Separator();
 
-    // List pane, grouped by type. Selecting a row records its id; the detail pane resolves it.
+    // List pane, grouped by type. Selecting a row records its id; the detail pane resolves it. Each
+    // group is filtered by the shared box and shown alphabetically. One scratch scope spans all three
+    // loops, so their id arrays stack safely and stay alive through the rendering below.
+    DrawFilterBox("##db_filter", DatabaseFilter, 300.0f);
     ImGui::BeginChild("db_list", ImVec2(300.0f, 0.0f), ImGuiChildFlags_Borders);
+    auto scratch = Arena::GetScratch();
+    StringView filter = DatabaseFilter.ToString();
 
     // Rows show the short (root-relative) id since the group already names the type.
     ImGui::SeparatorText("Textures");
-    for (TextureAsset& tex : registry->TextureAssets) {
-        DrawDatabaseRow(this, EAssetType::Texture, tex.Manifest.Id);
+    for (const AssetId* id : SortedFilteredIds(scratch, registry->TextureAssets, EAssetType::Texture, filter)) {
+        DrawDatabaseRow(this, EAssetType::Texture, *id);
     }
 
     ImGui::SeparatorText("SpriteSheets");
-    for (SpriteSheetAsset& sheet : registry->SpriteSheetAssets) {
-        DrawDatabaseRow(this, EAssetType::SpriteSheet, sheet.Manifest.Id);
+    for (const AssetId* id :
+         SortedFilteredIds(scratch, registry->SpriteSheetAssets, EAssetType::SpriteSheet, filter)) {
+        DrawDatabaseRow(this, EAssetType::SpriteSheet, *id);
     }
 
     ImGui::SeparatorText("Enemies");
-    for (EnemyAsset& enemy : registry->EnemyAssets) {
-        DrawDatabaseRow(this, EAssetType::Enemy, enemy.Manifest.Id);
+    for (const AssetId* id : SortedFilteredIds(scratch, registry->EnemyAssets, EAssetType::Enemy, filter)) {
+        DrawDatabaseRow(this, EAssetType::Enemy, *id);
     }
 
     ImGui::EndChild();
@@ -1119,12 +1193,15 @@ void AssetEditor::DrawTextureListView(AssetRegistry* registry) {
     ImGui::Separator();
 
     // List pane.
+    DrawFilterBox("##texture_filter", TextureFilter, 240.0f);
     ImGui::BeginChild("list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
     ImGui::TextDisabled("Textures (%d)", registry->TextureAssets.Size);
-    for (TextureAsset& tex : registry->TextureAssets) {
-        bool selected = (tex.Manifest.Id == Selected);
-        if (ImGui::Selectable(ShortId(EAssetType::Texture, tex.Manifest.Id).Str(), selected)) {
-            Selected = tex.Manifest.Id;
+    auto scratch = Arena::GetScratch();
+    for (const AssetId* id :
+         SortedFilteredIds(scratch, registry->TextureAssets, EAssetType::Texture, TextureFilter.ToString())) {
+        bool selected = (*id == Selected);
+        if (ImGui::Selectable(ShortId(EAssetType::Texture, *id).Str(), selected)) {
+            Selected = *id;
         }
     }
     ImGui::EndChild();
@@ -1262,13 +1339,15 @@ void AssetEditor::DrawSpriteSheetTab(AssetRegistry* registry) {
     ImGui::Separator();
 
     // List pane.
+    DrawFilterBox("##sheet_filter", SheetFilter, 240.0f);
     ImGui::BeginChild("sheet_list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
     ImGui::TextDisabled("SpriteSheets (%d)", registry->SpriteSheetAssets.Size);
-    for (SpriteSheetAsset& sheet : registry->SpriteSheetAssets) {
-        bool selected = (sheet.Manifest.Id == Selected);
-        if (ImGui::Selectable(ShortId(EAssetType::SpriteSheet, sheet.Manifest.Id).Str(),
-                              selected)) {
-            Selected = sheet.Manifest.Id;
+    auto scratch = Arena::GetScratch();
+    for (const AssetId* id :
+         SortedFilteredIds(scratch, registry->SpriteSheetAssets, EAssetType::SpriteSheet, SheetFilter.ToString())) {
+        bool selected = (*id == Selected);
+        if (ImGui::Selectable(ShortId(EAssetType::SpriteSheet, *id).Str(), selected)) {
+            Selected = *id;
         }
     }
     ImGui::EndChild();
@@ -1309,12 +1388,15 @@ void AssetEditor::DrawEnemyTab(AssetRegistry* registry) {
     ImGui::Separator();
 
     // List pane.
+    DrawFilterBox("##enemy_filter", EnemyFilter, 240.0f);
     ImGui::BeginChild("enemy_list", ImVec2(240.0f, 0.0f), ImGuiChildFlags_Borders);
     ImGui::TextDisabled("Enemies (%d)", registry->EnemyAssets.Size);
-    for (EnemyAsset& enemy : registry->EnemyAssets) {
-        bool selected = (enemy.Manifest.Id == Selected);
-        if (ImGui::Selectable(ShortId(EAssetType::Enemy, enemy.Manifest.Id).Str(), selected)) {
-            Selected = enemy.Manifest.Id;
+    auto scratch = Arena::GetScratch();
+    for (const AssetId* id :
+         SortedFilteredIds(scratch, registry->EnemyAssets, EAssetType::Enemy, EnemyFilter.ToString())) {
+        bool selected = (*id == Selected);
+        if (ImGui::Selectable(ShortId(EAssetType::Enemy, *id).Str(), selected)) {
+            Selected = *id;
         }
     }
     ImGui::EndChild();

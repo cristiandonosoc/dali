@@ -27,6 +27,14 @@ struct AssetEditor {
     i32 GitExitCode = 0;
     FixedVector<AssetId, kMaxDirtyAssets> GitDirtyIds = {};
 
+    // Left-list search filters (case-insensitive substring; empty matches everything). One per list
+    // so a filter typed in one tab doesn't carry into another. Every list is also shown sorted
+    // alphabetically by short id.
+    FixedString<64> DatabaseFilter = {};
+    FixedString<64> TextureFilter = {};
+    FixedString<64> SheetFilter = {};
+    FixedString<64> EnemyFilter = {};
+
     // Texture creation form scratch. The id is the short, root-relative form (the "textures/" root
     // is prepended on create); Source stays a full raw path.
     FixedString<256> NewSource = "raw/sprites/goblin/D_Walk.png";

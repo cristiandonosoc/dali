@@ -1,8 +1,8 @@
 #include <dali/core/string.h>
 
-#include <dali/core/memory.h>
 #include <dali/core/container.h>
 #include <dali/core/filesystem.h>
+#include <dali/core/memory.h>
 
 #include <stb/stb_sprintf.h>
 
@@ -29,6 +29,13 @@ inline bool StrCmpWithLength(const char* s1, const char* s2, u64 size) {
     }
 
     return true;
+}
+
+inline char AsciiLower(char c) {
+    if (c >= 'A' && c <= 'Z') {
+        return (char)(c - 'A' + 'a');
+    }
+    return c;
 }
 
 }  // namespace string_private
@@ -65,6 +72,51 @@ bool StringView::Equals(const StringView& other) const {
     }
 
     return string_private::StrCmpWithLength(_Str, other._Str, Size);
+}
+
+bool StringView::Contains(const StringView& target) const {
+    if (target.IsEmpty()) {
+        return true;
+    }
+    if (Size < target.Size) {
+        return false;
+    }
+
+    // Naive scan: try each start offset where the target still fits. Fine for the short strings
+    // this is used on (asset ids, filter boxes); reach for something smarter only if a hot path
+    // needs it.
+    u64 last = Size - target.Size;
+    for (u64 i = 0; i <= last; i++) {
+        if (string_private::StrCmpWithLength(_Str + i, target._Str, target.Size)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool StringView::ContainsCi(const StringView& target) const {
+    using namespace string_private;
+    if (target.IsEmpty()) {
+        return true;
+    }
+    if (Size < target.Size) {
+        return false;
+    }
+
+    u64 last = Size - target.Size;
+    for (u64 i = 0; i <= last; i++) {
+        bool match = true;
+        for (u64 j = 0; j < target.Size; j++) {
+            if (AsciiLower(_Str[i + j]) != AsciiLower(target._Str[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            return true;
+        }
+    }
+    return false;
 }
 
 StringView InternStringToArena(Arena* arena, const char* string, u64 length) {
@@ -254,6 +306,5 @@ void PrintBacktrace(Arena* arena, u32 frames_to_skip) {
                     line_number);
     }
 }
-
 
 }  // namespace kdk

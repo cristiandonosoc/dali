@@ -351,6 +351,119 @@ TEST_CASE("StringView equality with different lengths", "[string]") {
     }
 }
 
+// Contains / ContainsCi ---------------------------------------------------------------------------
+
+TEST_CASE("StringView::Contains", "[string][contains]") {
+    SECTION("Empty needle is contained by everything") {
+        CHECK(StringView("hello").Contains(StringView()));
+        CHECK(StringView("hello").Contains(StringView("")));
+        CHECK(StringView().Contains(StringView()));       // empty in empty
+        CHECK(StringView("").Contains(StringView("")));
+    }
+
+    SECTION("Non-empty needle is never in an empty haystack") {
+        CHECK_FALSE(StringView().Contains(StringView("a")));
+        CHECK_FALSE(StringView("").Contains(StringView("a")));
+    }
+
+    SECTION("Substring found at start, middle, and end") {
+        StringView s("textures/goblin/walk");
+        CHECK(s.Contains(StringView("textures")));  // start
+        CHECK(s.Contains(StringView("goblin")));    // middle
+        CHECK(s.Contains(StringView("walk")));      // end
+        CHECK(s.Contains(StringView("/goblin/")));  // spanning separators
+    }
+
+    SECTION("Whole-string and single-char matches") {
+        StringView s("abc");
+        CHECK(s.Contains(StringView("abc")));  // equal to haystack
+        CHECK(s.Contains(StringView("a")));
+        CHECK(s.Contains(StringView("b")));
+        CHECK(s.Contains(StringView("c")));
+    }
+
+    SECTION("Absent substrings are not found") {
+        StringView s("abcdef");
+        CHECK_FALSE(s.Contains(StringView("xyz")));
+        CHECK_FALSE(s.Contains(StringView("acf")));   // right chars, wrong order
+        CHECK_FALSE(s.Contains(StringView("abcdefg")));  // needle longer than haystack
+    }
+
+    SECTION("Is case-sensitive") {
+        StringView s("Goblin");
+        CHECK(s.Contains(StringView("Gob")));
+        CHECK_FALSE(s.Contains(StringView("gob")));
+        CHECK_FALSE(s.Contains(StringView("GOBLIN")));
+    }
+
+    SECTION("Near-miss with a partial repeated prefix") {
+        // The scan must keep sliding after a partial match at index 0.
+        StringView s("abab_abc");
+        CHECK(s.Contains(StringView("abc")));
+        CHECK_FALSE(StringView("ababab").Contains(StringView("abc")));
+    }
+
+    SECTION("Respects Size, not null terminator") {
+        StringView haystack("hello world", 5);  // only "hello"
+        CHECK(haystack.Contains(StringView("hello")));
+        CHECK_FALSE(haystack.Contains(StringView("world")));
+        CHECK_FALSE(haystack.Contains(StringView("hello world")));
+
+        StringView needle("worldwide", 5);  // only "world"
+        CHECK(StringView("say world now").Contains(needle));
+    }
+
+    SECTION("Handles embedded null bytes") {
+        // hay is {'a','\0','b','c'} — the search must not stop at the interior null.
+        const char hay[] = {'a', '\0', 'b', 'c'};
+        const char need[] = {'\0', 'b'};
+        StringView h(hay, sizeof(hay));
+        StringView n(need, sizeof(need));
+        CHECK(h.Contains(n));                     // "\0b" at indices 1,2
+        CHECK(h.Contains(StringView("bc", 2)));   // "bc" at indices 2,3
+        CHECK_FALSE(h.Contains(StringView("ab", 2)));  // 'a' and 'b' straddle the null, not adjacent
+    }
+}
+
+TEST_CASE("StringView::ContainsCi", "[string][contains]") {
+    SECTION("Empty needle is contained by everything") {
+        CHECK(StringView("Hello").ContainsCi(StringView()));
+        CHECK(StringView().ContainsCi(StringView()));
+    }
+
+    SECTION("Non-empty needle is never in an empty haystack") {
+        CHECK_FALSE(StringView().ContainsCi(StringView("a")));
+    }
+
+    SECTION("Matches regardless of case on either side") {
+        StringView s("Textures/Goblin/Walk");
+        CHECK(s.ContainsCi(StringView("goblin")));
+        CHECK(s.ContainsCi(StringView("GOBLIN")));
+        CHECK(s.ContainsCi(StringView("GoBlIn")));
+        CHECK(StringView("goblin").ContainsCi(StringView("GOB")));
+        CHECK(StringView("GOBLIN").ContainsCi(StringView("gob")));
+    }
+
+    SECTION("Still fails when the letters genuinely differ") {
+        StringView s("goblin");
+        CHECK_FALSE(s.ContainsCi(StringView("wolf")));
+        CHECK_FALSE(s.ContainsCi(StringView("goblins")));  // longer than haystack
+    }
+
+    SECTION("Only ASCII letters are folded; digits and symbols compare literally") {
+        StringView s("Clip_42");
+        CHECK(s.ContainsCi(StringView("clip_42")));
+        CHECK(s.ContainsCi(StringView("_42")));
+        CHECK_FALSE(s.ContainsCi(StringView("clip-42")));  // '_' vs '-'
+    }
+
+    SECTION("Respects Size, not null terminator") {
+        StringView haystack("HELLO world", 5);  // only "HELLO"
+        CHECK(haystack.ContainsCi(StringView("hello")));
+        CHECK_FALSE(haystack.ContainsCi(StringView("world")));
+    }
+}
+
 TEST_CASE("Concat tests", "[string][concat]") {
     SECTION("Empty strings") {
         CREATE_ARENA();
