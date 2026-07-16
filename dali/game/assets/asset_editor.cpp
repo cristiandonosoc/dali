@@ -966,6 +966,54 @@ void DrawAssetMetadata(const AssetManifest* manifest) {
     }
 }
 
+// (Re)reads the .yml of |id| into the editor's preview cache. Called on selection change and on
+// Refresh, never per frame.
+void LoadYamlPreview(AssetEditor* editor, AssetId id) {
+    editor->YamlPreviewId = id;
+    editor->YamlPreview = {};
+    editor->YamlPreviewTruncated = false;
+
+    auto scratch = Arena::GetScratch();
+    Arena* arena = scratch;
+    FileContents contents = ReadFile(arena, AssetYmlPath(arena, id));
+    editor->YamlPreviewLoaded = contents.IsValid();
+    if (!editor->YamlPreviewLoaded) {
+        return;
+    }
+
+    StringView text((const char*)contents.Data.data(), contents.Data.size());
+    editor->YamlPreviewTruncated = text.Size >= AssetEditor::kMaxYamlPreview;
+    editor->YamlPreview.Set(text);
+}
+
+// The Database detail pane's raw manifest view: the .yml exactly as it sits on disk, so what serde
+// wrote (or is about to read) can be debugged by eye. Refresh re-reads after a Save or an external
+// edit.
+void DrawYamlPreview(AssetEditor* editor, const AssetManifest* manifest) {
+    if (!(editor->YamlPreviewId == manifest->Id)) {
+        LoadYamlPreview(editor, manifest->Id);
+    }
+
+    ImGui::SeparatorText("Manifest (yml)");
+    if (ImGui::SmallButton("Refresh")) {
+        LoadYamlPreview(editor, manifest->Id);
+    }
+    if (!editor->YamlPreviewLoaded) {
+        ImGui::TextDisabled("(cannot read the .yml)");
+        return;
+    }
+    if (editor->YamlPreviewTruncated) {
+        ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.2f, 1.0f), "(file larger than preview - truncated)");
+    }
+
+    ImGui::BeginChild("yaml_preview",
+                      ImVec2(0.0f, 0.0f),
+                      ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::TextUnformatted(editor->YamlPreview.Str());
+    ImGui::EndChild();
+}
+
 // Whether |id| is in the last verify's dirty set (linear scan; the set is small).
 bool IsGitDirty(const AssetEditor* editor, AssetId id) {
     for (const AssetId& dirty : editor->GitDirtyIds) {
@@ -1352,6 +1400,7 @@ void AssetEditor::DrawDatabaseTab(AssetRegistry* registry) {
     if (const AssetManifest* manifest = FindManifest(registry, DatabaseSelected)) {
         DrawAssetMetadata(manifest);
         DrawGitStatus(this, manifest);
+        DrawYamlPreview(this, manifest);
     } else {
         ImGui::TextWrapped("Select an asset to see its metadata.");
     }

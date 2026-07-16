@@ -18,6 +18,14 @@ struct AssetEditor {
     // inspectors use, so switching panes doesn't cross-contaminate).
     AssetId DatabaseSelected = {};
 
+    // Database pane yml preview: the selected asset's manifest file as it is on disk, cached here
+    // so the read happens on selection change (or Refresh), never per frame.
+    static constexpr u64 kMaxYamlPreview = 16 * 1024;
+    AssetId YamlPreviewId = {};
+    bool YamlPreviewLoaded = false;    // did the last read succeed
+    bool YamlPreviewTruncated = false;  // file was larger than the preview buffer
+    FixedString<kMaxYamlPreview> YamlPreview = {};
+
     // Git "Verify all" cache (Database pane): the set of assets whose .yml or .asset is dirty per the
     // last global `git status`. Run on demand (a subprocess spawn is slow); one call covers every
     // asset. Both files of an asset collapse to its id, so this is an asset-level set.
