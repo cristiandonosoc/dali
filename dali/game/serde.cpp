@@ -127,12 +127,10 @@ void SerdeYaml<StringView>(SerdeArchive* sa, const char* name, StringView* value
 
     const YAML::Node& node = (*current)[name];
     if (!node.IsDefined()) {
-        *value = {};
         return;
     }
     std::string str;
     if (!DecodeNode(sa, name, node, &str)) {
-        *value = {};
         return;
     }
     *value = InternStringToArena(sa->TargetArena, str.c_str(), str.size());
@@ -152,7 +150,6 @@ void SerdeYaml<Vec2>(SerdeArchive* sa, const char* name, Vec2* value) {
 
     const YAML::Node& node = (*current)[name];
     if (!node.IsDefined()) {
-        *value = {};
         return;
     }
     DecodeNode(sa, name, node["x"], &value->x);
@@ -175,17 +172,16 @@ void SerdeYaml<Color32>(SerdeArchive* sa, const char* name, Color32* value) {
 
     const YAML::Node& node = (*current)[name];
     if (!node.IsDefined()) {
-        *value = {};
         return;
     }
     std::string str;
     if (!DecodeNode(sa, name, node, &str)) {
-        *value = {};
         return;
     }
+    // ParseColorHex leaves |value| alone on a malformed string, so a bad color keeps the struct's
+    // default rather than turning the thing transparent black.
     if (!ParseColorHex(StringView(str.c_str(), str.size()), value)) {
         sa->AddError(Printf(sa->TempArena, "key '%s': not an rrggbbaa color", name));
-        *value = {};
     }
 }
 

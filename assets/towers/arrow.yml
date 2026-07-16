@@ -1,12 +1,15 @@
-type: tower
-version: 1
-id: towers/arrow
-instance:
-  range: 180
-  fire_interval: 0.6
-  damage: 5
-  projectile_hit_radius: 8
-  cost: 40
-idle:
-  sprite_sheet: spritesheets/towers/archer
-  clip: idle_4
+Manifest:
+  Type: tower
+  Version: 1
+  Id: towers/arrow
+  Source: ''
+PerInstanceData:
+  Range: 180
+  FireInterval: 0.6
+  Damage: 5
+  ProjectileHitRadius: 8
+  Cost: 40
+  IdleClip:
+    SpriteSheetId: spritesheets/towers/archer
+    ClipName: idle_4
+    FlipX: false

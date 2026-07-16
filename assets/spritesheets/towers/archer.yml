@@ -1,74 +1,76 @@
-type: spritesheet
-version: 3
-id: spritesheets/towers/archer
-clips:
-  - name: idle_1
-    texture: textures/towers/archer_tower/idle_1
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0.5}
-    frames: [0]
-  - name: idle_2
-    texture: textures/towers/archer_tower/idle_2
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
-  - name: idle_3
-    texture: textures/towers/archer_tower/idle_3
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
-  - name: idle_4
-    texture: textures/towers/archer_tower/idle_4
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3, 4, 5]
-  - name: idle_5
-    texture: textures/towers/archer_tower/idle_5
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3, 4, 5]
-  - name: idle_6
-    texture: textures/towers/archer_tower/idle_6
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3, 4, 5]
-  - name: idle_7
-    texture: textures/towers/archer_tower/idle_7
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3, 4, 5]
-  - name: upgrade_1
-    texture: textures/towers/archer_tower/upgrade_1
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
-  - name: upgrade_2
-    texture: textures/towers/archer_tower/upgrade_2
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
-  - name: upgrade_4
-    texture: textures/towers/archer_tower/upgrade_4
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
-  - name: upgrade_3
-    texture: textures/towers/archer_tower/upgrade_3
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
-  - name: upgrade_5
-    texture: textures/towers/archer_tower/upgrade_5
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
-  - name: upgrade_7
-    texture: textures/towers/archer_tower/upgrade_7
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
-  - name: upgrade_6
-    texture: textures/towers/archer_tower/upgrade_6
-    grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
-    pivot: {x: 0, y: 0}
-    frames: [0, 1, 2, 3]
+Manifest:
+  Type: spritesheet
+  Version: 3
+  Id: spritesheets/towers/archer
+  Source: ''
+Clips:
+  - Name: idle_1
+    Texture: textures/towers/archer_tower/idle_1
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0.5}
+    Frames: [0]
+  - Name: idle_2
+    Texture: textures/towers/archer_tower/idle_2
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]
+  - Name: idle_3
+    Texture: textures/towers/archer_tower/idle_3
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]
+  - Name: idle_4
+    Texture: textures/towers/archer_tower/idle_4
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3, 4, 5]
+  - Name: idle_5
+    Texture: textures/towers/archer_tower/idle_5
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3, 4, 5]
+  - Name: idle_6
+    Texture: textures/towers/archer_tower/idle_6
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3, 4, 5]
+  - Name: idle_7
+    Texture: textures/towers/archer_tower/idle_7
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3, 4, 5]
+  - Name: upgrade_1
+    Texture: textures/towers/archer_tower/upgrade_1
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]
+  - Name: upgrade_2
+    Texture: textures/towers/archer_tower/upgrade_2
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]
+  - Name: upgrade_4
+    Texture: textures/towers/archer_tower/upgrade_4
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]
+  - Name: upgrade_3
+    Texture: textures/towers/archer_tower/upgrade_3
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]
+  - Name: upgrade_5
+    Texture: textures/towers/archer_tower/upgrade_5
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]
+  - Name: upgrade_7
+    Texture: textures/towers/archer_tower/upgrade_7
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]
+  - Name: upgrade_6
+    Texture: textures/towers/archer_tower/upgrade_6
+    Grid: {CellW: 70, CellH: 130, Margin: 0, Spacing: 0}
+    Pivot: {x: 0, y: 0}
+    Frames: [0, 1, 2, 3]

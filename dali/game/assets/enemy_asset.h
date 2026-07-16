@@ -34,6 +34,12 @@ struct WalkClips {
     Array<SpriteSheetClipReference, (i32)EFacing::COUNT> ByFacing = {};
 
     const SpriteSheetClipReference& Resolve(EFacing facing) const { return ByFacing[(i32)facing]; }
+
+    // Hand-written rather than SERDE(sa, this, ByFacing): the generic Array path would emit a
+    // positional sequence, which reads as nothing and silently reassigns every clip if EFacing is
+    // ever reordered. Keyed by facing name instead. The slots themselves still compose
+    // SpriteSheetClipReference::Serialize.
+    void Serialize(SerdeArchive* sa);
 };
 
 // The design-time definition of one enemy type ("goblin", "wolf") — a lightweight CDO. Pure
@@ -59,15 +65,19 @@ struct EnemyAsset {
         i32 Reward = 5;           // gold granted when a tower kills it
         Color32 Color = Color32::OrangeRed;  // draw color / sprite tint
         WalkClips Walk = {};  // per-facing walk animation; resolved against the registry
+
+        void Serialize(SerdeArchive* sa);
     };
     InstanceData PerInstanceData = {};
 
     // Writes the manifest for a new blueprint with default stats. Overwrites any existing.
     static bool Create(AssetId id);
-    // Reads the manifest at |id|. nullopt if it isn't an enemy or the version mismatches.
+    // Reads the manifest at |id|. nullopt if it isn't an enemy or it was written by a newer build.
     static std::optional<EnemyAsset> LoadFromDisk(AssetId id);
 
-    bool SaveManifest() const;
+    bool SaveManifest();
+
+    void Serialize(SerdeArchive* sa);
 
     bool ResolveReferences(AssetRegistry&) { return true; }  // no-op
 };

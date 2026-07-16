@@ -1,23 +1,28 @@
-type: enemy
-version: 2
-id: enemies/wolf
-instance:
-  speed: 82
-  max_health: 10
-  damage: 5
-  reward: 5
-  color: "46158cff"
-walk:
-  down:
-    sprite_sheet: spritesheets/wolf
-    clip: d_walk
-  up:
-    sprite_sheet: spritesheets/wolf
-    clip: u_walk
-  left:
-    sprite_sheet: spritesheets/wolf
-    clip: s_walk
-  right:
-    sprite_sheet: spritesheets/wolf
-    clip: s_walk
-    flip_x: true
+Manifest:
+  Type: enemy
+  Version: 2
+  Id: enemies/wolf
+  Source: ''
+PerInstanceData:
+  Speed: 82
+  MaxHealth: 10
+  Damage: 5
+  Reward: 5
+  Color: 46158cff
+  Walk:
+    Down:
+      SpriteSheetId: spritesheets/wolf
+      ClipName: d_walk
+      FlipX: false
+    Up:
+      SpriteSheetId: spritesheets/wolf
+      ClipName: u_walk
+      FlipX: false
+    Left:
+      SpriteSheetId: spritesheets/wolf
+      ClipName: s_walk
+      FlipX: false
+    Right:
+      SpriteSheetId: spritesheets/wolf
+      ClipName: s_walk
+      FlipX: true

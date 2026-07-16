@@ -14,6 +14,8 @@ struct AssetRegistry;
 // live state on the Texture (Resource) and changeable without a re-bake.
 struct TextureImportSettings {
     bool FlipVertically = false;  // Row-flip at decode. Change requires re-import.
+
+    void Serialize(SerdeArchive* sa);
 };
 
 struct TextureAsset {
@@ -41,11 +43,13 @@ struct TextureAsset {
                        const TextureImportSettings& settings,
                        ETextureFilter filter);
     // Reads the baked pair for |id| and uploads to the GPU. nullopt if the manifest isn't a
-    // texture, the version mismatches, or a file is missing.
+    // texture, it was written by a newer build, or a file is missing.
     static std::optional<TextureAsset> LoadFromDisk(AssetId id);
 
     // Rewrites only the .yml (metadata tweak; no re-decode, no re-upload).
-    bool SaveManifest() const;
+    bool SaveManifest();
+
+    void Serialize(SerdeArchive* sa);
     // Re-runs Import from Manifest.Source with the current Settings, then reloads in place
     // (replaces this asset's GPU resource and fields). Use after changing a payload-affecting
     // setting.

@@ -5,8 +5,6 @@
 #include <dali/game/platform.h>
 #include <dali/game/serde.h>
 
-#include <yaml-cpp/yaml.h>
-
 namespace kdk {
 
 namespace asset_private {
@@ -242,14 +240,16 @@ SerdeArchive* OpenManifestForRead(Arena* arena, AssetId id) {
         return nullptr;
     }
 
-    SerdeArchive* sa = arena->Push<SerdeArchive>();
+    SerdeArchive* sa = arena->PushInit<SerdeArchive>();
     *sa = SerdeArchive::New(arena, arena, ESerdeBackend::YAML, ESerdeMode::Deserialize);
     sa->LoadData(contents.Data);
     return sa;
 }
 
 SerdeArchive* OpenManifestForWrite(Arena* arena) {
-    SerdeArchive* sa = arena->Push<SerdeArchive>();
+    // PushInit, not Push: SerdeArchive holds a YAML::Node, so assigning onto raw arena bytes would
+    // run a copy-assignment over an unconstructed object.
+    SerdeArchive* sa = arena->PushInit<SerdeArchive>();
     *sa = SerdeArchive::New(arena, arena, ESerdeBackend::YAML, ESerdeMode::Serialize);
     return sa;
 }
@@ -312,15 +312,18 @@ bool PeekManifest(AssetId id, AssetManifest* out) {
     auto scratch = Arena::GetScratch();
     Arena* arena = scratch;
 
-    FileContents contents = ReadFile(arena, AssetYmlPath(arena, id));
-    if (!contents.IsValid()) {
+    // Reads the header through AssetManifest::Serialize, the same one the real loaders use, rather
+    // than a second hand-written reader that could disagree with it. Deserializing the header alone
+    // is enough: the type's own fields are simply keys this pass never asks for.
+    SerdeArchive* sa = OpenManifestForRead(arena, id);
+    if (!sa) {
         return false;
     }
-    YAML::Node node = YAML::Load((const char*)contents.Data.data());
-
-    // We build without exceptions: as<T>(fallback) never throws on a missing/mistyped field.
-    out->Type = AssetTypeFromString(StringView(node["type"].as<std::string>("invalid").c_str()));
-    out->Version = node["version"].as<int>(0);
+    *out = {};  // The missing-key rule means fields are only written if present; start from defaults.
+    // Under the "Manifest" key, NOT at the root: that is where every asset's Serialize puts it, via
+    // SERDE(sa, this, Manifest). Reading at the root finds nothing and reports Invalid for every
+    // asset in the crawl.
+    Serde(sa, "Manifest", out);
     out->Id = id;
     return true;
 }

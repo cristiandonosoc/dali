@@ -32,14 +32,18 @@ struct TowerAsset {
         int Cost = 40;  // gold to place one
 
         SpriteSheetClipReference IdleClip = {};
+
+        void Serialize(SerdeArchive* sa);
     };
     InstanceData PerInstanceData = {};
 
     // Writes the manifest for a new blueprint with default stats. Overwrites any existing.
     static bool Create(AssetId id);
-    // Reads the manifest at |id|. nullopt if it isn't an enemy or the version mismatches.
+    // Reads the manifest at |id|. nullopt if it isn't a tower or it was written by a newer build.
     static std::optional<TowerAsset> LoadFromDisk(AssetId id);
-    bool SaveManifest() const;
+    bool SaveManifest();
+
+    void Serialize(SerdeArchive* sa);
 
     bool ResolveReferences(AssetRegistry& registry);
 };

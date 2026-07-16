@@ -1,9 +1,11 @@
-type: texture
-version: 1
-id: textures/towers/archer_tower/idle_3
-source: raw/sprites/towers/archer_tower/idle_3.png
-width: 280
-height: 130
-channels: 4
-flip: 0
-filter: 0
+Manifest:
+  Type: texture
+  Version: 1
+  Id: textures/towers/archer_tower/idle_3
+  Source: raw/sprites/towers/archer_tower/idle_3.png
+Settings:
+  FlipVertically: false
+Width: 280
+Height: 130
+Channels: 4
+Filter: 0

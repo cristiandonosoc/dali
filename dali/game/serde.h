@@ -51,10 +51,18 @@ enum class ESerdeMode : u8 {
     Deserialize,
 };
 
-// One (de)serialization pass. Deserializing is best-effort: a missing key leaves the field at its
-// default (this is what makes an older file load against a newer struct), and a malformed value is
-// recorded in Errors and skipped rather than aborting the whole load. Callers decide what a partial
-// load means by checking HasErrors().
+// One (de)serialization pass.
+//
+// THE MISSING-KEY RULE: deserializing NEVER writes a field whose key is absent - it leaves the value
+// exactly as the caller constructed it. Deserializing is a merge onto defaults, not an overwrite.
+// That is the whole of the version tolerance: an older file simply lacks the newer keys, and those
+// members still hold the `= 8` from their declaration. Zeroing them instead would silently turn
+// `float FPS = 8` into a frozen animation on every file written before FPS existed. It follows that
+// a caller must deserialize into a FRESH object (the load envelope does: `T asset = {}`); reusing a
+// dirty one leaves stale values wherever a key is missing.
+//
+// A malformed value is likewise recorded in Errors and skipped (the field keeps its default) rather
+// than aborting the load. Callers decide what a partial load means by checking HasErrors().
 struct SerdeArchive {
     static constexpr i32 kMaxErrors = 128;
 
@@ -154,8 +162,7 @@ void SerdeYaml(SerdeArchive* sa, const char* name, T* value) {
 
     const YAML::Node& node = (*prev)[name];
     if (!node.IsDefined()) {
-        *value = {};  // Missing key: the field keeps its default. This is the version tolerance.
-        return;
+        return;  // See the missing-key rule below.
     }
     sa->_CurrentNode = const_cast<YAML::Node*>(&node);
     value->Serialize(sa);
@@ -181,13 +188,11 @@ void SerdeYaml(SerdeArchive* sa, const char* name, T* value) {
 
     const YAML::Node& node = (*current)[name];
     if (!node.IsDefined()) {
-        *value = {};
         return;
     }
     WireType wire = {};
     if (!DecodeNode(sa, name, node, &wire)) {
-        *value = {};
-        return;
+        return;  // Error recorded; keep the default rather than zeroing.
     }
     *value = (T)wire;
 }
@@ -215,12 +220,10 @@ void SerdeYaml(SerdeArchive* sa, const char* name, FixedString<CAPACITY>* value)
 
     const YAML::Node& node = (*current)[name];
     if (!node.IsDefined()) {
-        *value = {};
         return;
     }
     std::string str;
     if (!DecodeNode(sa, name, node, &str)) {
-        *value = {};
         return;
     }
     if (str.size() >= CAPACITY) {
@@ -347,16 +350,18 @@ void SerdeYaml(SerdeArchive* sa, const char* name, Array<T, N>* values) {
         return;
     }
 
-    *values = {};
     const YAML::Node& node = (*current)[name];
     if (!node.IsDefined()) {
-        return;
+        return;  // Untouched, per the missing-key rule.
     }
     if (!node.IsSequence()) {
         sa->AddError(Printf(sa->TempArena, "key '%s': expected a sequence", name));
         return;
     }
 
+    // Present but shorter than N: the tail is zeroed rather than left over from the caller, so the
+    // sequence on disk is the whole story for a key that IS there.
+    *values = {};
     i32 index = 0;
     for (YAML::const_iterator it = node.begin(); it != node.end(); ++it) {
         if (index >= N) {
@@ -380,16 +385,16 @@ void SerdeYaml(SerdeArchive* sa, const char* name, FixedVector<T, N>* values) {
         return;
     }
 
-    values->Clear();
     const YAML::Node& node = (*current)[name];
     if (!node.IsDefined()) {
-        return;
+        return;  // Untouched, per the missing-key rule.
     }
     if (!node.IsSequence()) {
         sa->AddError(Printf(sa->TempArena, "key '%s': expected a sequence", name));
         return;
     }
 
+    values->Clear();
     for (YAML::const_iterator it = node.begin(); it != node.end(); ++it) {
         if (values->IsFull()) {
             sa->AddError(Printf(sa->TempArena, "key '%s': more than %d elements (truncated)", name, N));
@@ -432,7 +437,6 @@ void SerdeScalarString(SerdeArchive* sa, FixedString<CAPACITY>* value) {
 
     std::string str;
     if (!serde::DecodeNode(sa, "<scalar>", *current, &str)) {
-        *value = {};
         return;
     }
     if (str.size() >= CAPACITY) {

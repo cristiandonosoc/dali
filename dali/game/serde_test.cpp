@@ -65,6 +65,26 @@ struct Leaf {
     }
 };
 
+// Every field has a NON-zero default, so a missing key that wrongly zeroed instead of leaving the
+// value alone is caught. Leaf cannot catch it: its defaults are all zero already.
+struct Defaulted {
+    float FPS = 8.0f;
+    i32 Count = 5;
+    bool Enabled = true;
+    Color32 Tint = Color32::OrangeRed;
+    FixedString<32> Name = "unset";
+    FixedVector<i32, 4> Items = {};
+
+    void Serialize(SerdeArchive* sa) {
+        SERDE(sa, this, FPS);
+        SERDE(sa, this, Count);
+        SERDE(sa, this, Enabled);
+        SERDE(sa, this, Tint);
+        SERDE(sa, this, Name);
+        SERDE(sa, this, Items);
+    }
+};
+
 struct Nested {
     Leaf Inner = {};
     Vec2 Position = {};
@@ -227,25 +247,50 @@ TEST_CASE("Serde deserialized strings outlive the source buffer", "[serde]") {
     CHECK(text == "interned"sv);
 }
 
-TEST_CASE("Serde tolerates a missing key by keeping the default", "[serde]") {
+TEST_CASE("Serde leaves a missing key's field untouched", "[serde]") {
     using namespace kdk::serde_test_private;
     CREATE_ARENA();
 
-    // This is the version-tolerance property: an older file simply lacks the newer keys, and the
-    // struct's defaults stand in. Nothing here is an error.
-    StringView yaml = "Root:\n  Value: 7\n"sv;
+    // THE version-tolerance property, and the reason deserializing is a merge onto defaults rather
+    // than an overwrite. An older file lacks the newer keys; those members must still hold what the
+    // struct declared. Zeroing them instead would freeze every animation written before FPS existed.
+    StringView yaml = "Root:\n  Count: 7\n"sv;
 
     SerdeArchive load =
         SerdeArchive::New(&arena, &arena, ESerdeBackend::YAML, ESerdeMode::Deserialize);
     load.LoadData(yaml.ToSpan());
 
-    Leaf out = {};
-    out.Name.Set("untouched"sv);
+    Defaulted out = {};
+    out.Items.Push(1);
     Serde(&load, "Root", &out);
 
-    CHECK(out.Value == 7);
-    CHECK(out.Name.IsEmpty());  // Absent key resets to the default, not left as-is.
+    CHECK(out.Count == 7);  // present: taken from the file
+    CHECK(out.FPS == 8.0f);
+    CHECK(out.Enabled == true);
+    CHECK(out.Tint.Bits == Color32::OrangeRed.Bits);
+    CHECK(out.Name == FixedString<32>("unset"sv));
+    REQUIRE(out.Items.Size == 1);
     CHECK(!load.HasErrors());
+}
+
+TEST_CASE("Serde keeps the default when a present value is malformed", "[serde]") {
+    using namespace kdk::serde_test_private;
+    CREATE_ARENA();
+
+    // A bad value is an error, but it must not be WORSE than the field being absent.
+    StringView yaml = "Root:\n  FPS: fast\n  Tint: nonsense\n"sv;
+
+    SerdeArchive load =
+        SerdeArchive::New(&arena, &arena, ESerdeBackend::YAML, ESerdeMode::Deserialize);
+    load.LoadData(yaml.ToSpan());
+
+    Defaulted out = {};
+    Serde(&load, "Root", &out);
+
+    CHECK(out.FPS == 8.0f);
+    CHECK(out.Tint.Bits == Color32::OrangeRed.Bits);
+    CHECK(load.HasErrors());
+    CHECK(load.Errors.Size == 2);
 }
 
 TEST_CASE("Serde records an error for a malformed value instead of throwing", "[serde]") {

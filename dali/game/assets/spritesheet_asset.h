@@ -18,6 +18,8 @@ struct SpriteGrid {
     i32 CellH = 0;
     i32 Margin = 0;   // Border (px) around the whole texture before the first cell.
     i32 Spacing = 0;  // Gap (px) between adjacent cells.
+
+    void Serialize(SerdeArchive* sa);
 };
 
 // A frame's sampled sub-rect within its texture, in normalized UVs. Baked at resolve time from the
@@ -89,6 +91,9 @@ struct SpriteSheetClip {
     // editors read/write exactly these members and nowhere else lists them.
     ClipEditFields EditFields() const;
     void ApplyEditFields(const ClipEditFields& fields);
+
+    // Authored fields only; the _-prefixed bakes are rebuilt by Resolve().
+    void Serialize(SerdeArchive* sa);
 };
 
 // A spritesheet: one concept ("goblin"), assembled from the clips over its textures. Pure metadata
@@ -107,10 +112,12 @@ struct SpriteSheetAsset {
     // Writes the manifest for a new, empty sheet (no clips) — a spritesheet is created from just
     // its id; clips are added in the inspector. Overwrites any existing.
     static bool Create(AssetId id);
-    // Reads the manifest at |id|. nullopt if it isn't a spritesheet or the version mismatches. Does
-    // NOT resolve/bake clips (the registry does that in a second pass).
+    // Reads the manifest at |id|. nullopt if it isn't a spritesheet or it was written by a newer
+    // build. Does NOT resolve/bake clips (the registry does that in a second pass).
     static std::optional<SpriteSheetAsset> LoadFromDisk(AssetId id);
-    bool SaveManifest() const;
+    bool SaveManifest();
+
+    void Serialize(SerdeArchive* sa);
 
     // Resolves and bakes every clip against |registry|. Logs each clip whose texture is missing;
     // returns whether all resolved.
@@ -135,6 +142,11 @@ struct SpriteSheetClipReference {
 
     // The referenced clip, looked up live. nullptr if unset, or the sheet/clip no longer exists.
     const SpriteSheetClip* Resolve(AssetRegistry& registry) const;
+
+    // The ONE encoding of a clip reference. Every asset that points at a clip composes this instead
+    // of spelling the fields out again — which is what let FlipX ship in the enemy's walk clips and
+    // go missing from the tower's idle clip for two versions.
+    void Serialize(SerdeArchive* sa);
 };
 
 }  // namespace kdk

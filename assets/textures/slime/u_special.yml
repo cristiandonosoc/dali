@@ -1,9 +1,11 @@
-type: texture
-version: 1
-id: textures/slime/u_special
-source: raw/sprites/slime/U_Special.png
-width: 288
-height: 48
-channels: 4
-flip: 0
-filter: 0
+Manifest:
+  Type: texture
+  Version: 1
+  Id: textures/slime/u_special
+  Source: raw/sprites/slime/U_Special.png
+Settings:
+  FlipVertically: false
+Width: 288
+Height: 48
+Channels: 4
+Filter: 0

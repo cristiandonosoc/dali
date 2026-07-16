@@ -1,9 +1,11 @@
-type: texture
-version: 1
-id: textures/goblin/s_walk
-source: raw/sprites/goblin/S_Walk.png
-width: 288
-height: 48
-channels: 4
-flip: 0
-filter: 0
+Manifest:
+  Type: texture
+  Version: 1
+  Id: textures/goblin/s_walk
+  Source: raw/sprites/goblin/S_Walk.png
+Settings:
+  FlipVertically: false
+Width: 288
+Height: 48
+Channels: 4
+Filter: 0

@@ -3,8 +3,7 @@
 #include <dali/core/memory.h>
 #include <dali/game/assets/registry.h>
 #include <dali/game/platform.h>
-
-#include <yaml-cpp/yaml.h>
+#include <dali/game/serde.h>
 
 namespace kdk {
 
@@ -128,136 +127,40 @@ void SpriteSheetClip::ApplyEditFields(const ClipEditFields& fields) {
     Pivot = fields.Pivot;
 }
 
-bool SpriteSheetAsset::Create(AssetId id) {
-    if (!id.IsValid()) {
-        LogError("SpriteSheetAsset::Create: non-canonical id '%s'", id.Value.Str());
-        return false;
-    }
-
-    SpriteSheetAsset sheet = {};
-    sheet.Manifest.Type = kAssetType;
-    sheet.Manifest.Version = kVersion;
-    sheet.Manifest.Id = id;
-    sheet.Manifest.HasPayload = false;
-    return sheet.SaveManifest();
+void SpriteGrid::Serialize(SerdeArchive* sa) {
+    SERDE(sa, this, CellW);
+    SERDE(sa, this, CellH);
+    SERDE(sa, this, Margin);
+    SERDE(sa, this, Spacing);
 }
+
+void SpriteSheetClip::Serialize(SerdeArchive* sa) {
+    SERDE(sa, this, Name);
+    SERDE(sa, this, Texture);
+    SERDE(sa, this, Grid);
+    SERDE(sa, this, Pivot);
+    SERDE(sa, this, FPS);
+    SERDE(sa, this, Frames);
+}
+
+void SpriteSheetClipReference::Serialize(SerdeArchive* sa) {
+    SERDE(sa, this, SpriteSheetId);
+    SERDE(sa, this, ClipName);
+    SERDE(sa, this, FlipX);
+}
+
+void SpriteSheetAsset::Serialize(SerdeArchive* sa) {
+    SERDE(sa, this, Manifest);
+    SERDE(sa, this, Clips);
+}
+
+bool SpriteSheetAsset::Create(AssetId id) { return CreateAsset<SpriteSheetAsset>(id); }
 
 std::optional<SpriteSheetAsset> SpriteSheetAsset::LoadFromDisk(AssetId id) {
-    auto scratch = Arena::GetScratch();
-    Arena* arena = scratch;
-
-    FileContents contents = ReadFile(arena, AssetYmlPath(arena, id));
-    if (!contents.IsValid()) {
-        return std::nullopt;
-    }
-    YAML::Node node = YAML::Load((const char*)contents.Data.data());
-
-    EAssetType type = AssetTypeFromString(StringView(node["type"].as<std::string>("invalid").c_str()));
-    if (type != kAssetType) {
-        return std::nullopt;
-    }
-
-    i32 version = node["version"].as<int>(0);
-    if (version != kVersion) {
-        LogError("SpriteSheetAsset: '%s' is version %d, expected %d - re-author needed",
-                 id.Value.Str(),
-                 version,
-                 kVersion);
-        return std::nullopt;
-    }
-
-    AssetId stored = AssetId::Normalize(StringView(node["id"].as<std::string>("").c_str()));
-    if (!(stored == id)) {
-        LogError("SpriteSheetAsset: id mismatch - manifest says '%s' but lives at '%s'",
-                 stored.Value.Str(),
-                 id.Value.Str());
-    }
-
-    SpriteSheetAsset sheet = {};
-    sheet.Manifest.Type = kAssetType;
-    sheet.Manifest.Version = version;
-    sheet.Manifest.Id = id;
-    sheet.Manifest.HasPayload = false;
-
-    if (YAML::Node clips = node["clips"]) {
-        for (const auto& clip_node : clips) {
-            if (sheet.Clips.IsFull()) {
-                break;
-            }
-            SpriteSheetClip clip = {};
-            clip.Name = StringView(clip_node["name"].as<std::string>("").c_str());
-            clip.Texture = AssetId::Normalize(StringView(clip_node["texture"].as<std::string>("").c_str()));
-            if (YAML::Node grid = clip_node["grid"]) {
-                clip.Grid.CellW = grid["cell_w"].as<int>(0);
-                clip.Grid.CellH = grid["cell_h"].as<int>(0);
-                clip.Grid.Margin = grid["margin"].as<int>(0);
-                clip.Grid.Spacing = grid["spacing"].as<int>(0);
-            }
-            // Optional; absent means centered (default). Old sheets predate it and load fine.
-            if (YAML::Node pivot = clip_node["pivot"]) {
-                clip.Pivot.x = pivot["x"].as<float>(0.0f);
-                clip.Pivot.y = pivot["y"].as<float>(0.0f);
-            }
-            clip.FPS = clip_node["fps"].as<float>(8.0f);  // optional; old sheets default to 8
-            if (YAML::Node frames = clip_node["frames"]) {
-                for (const auto& frame_node : frames) {
-                    if (clip.Frames.IsFull()) {
-                        break;
-                    }
-                    clip.Frames.Push(frame_node.as<int>(0));
-                }
-            }
-            sheet.Clips.Push(clip);
-        }
-    }
-
-    return sheet;
+    return LoadAssetFromDisk<SpriteSheetAsset>(id);
 }
 
-bool SpriteSheetAsset::SaveManifest() const {
-    auto scratch = Arena::GetScratch();
-    Arena* arena = scratch;
-
-    StringView yml_path = AssetYmlPath(arena, Manifest.Id);
-
-    YAML::Emitter emit;
-    emit << YAML::BeginMap;
-    emit << YAML::Key << "type" << YAML::Value << ToString(kAssetType).Str();
-    emit << YAML::Key << "version" << YAML::Value << kVersion;
-    emit << YAML::Key << "id" << YAML::Value << Manifest.Id.Value.Str();
-
-    emit << YAML::Key << "clips" << YAML::Value << YAML::BeginSeq;
-    for (const SpriteSheetClip& clip : Clips) {
-        emit << YAML::BeginMap;
-        emit << YAML::Key << "name" << YAML::Value << clip.Name.Str();
-        emit << YAML::Key << "texture" << YAML::Value << clip.Texture.Value.Str();
-        emit << YAML::Key << "grid" << YAML::Value << YAML::Flow << YAML::BeginMap;
-        emit << YAML::Key << "cell_w" << YAML::Value << clip.Grid.CellW;
-        emit << YAML::Key << "cell_h" << YAML::Value << clip.Grid.CellH;
-        emit << YAML::Key << "margin" << YAML::Value << clip.Grid.Margin;
-        emit << YAML::Key << "spacing" << YAML::Value << clip.Grid.Spacing;
-        emit << YAML::EndMap;
-        emit << YAML::Key << "pivot" << YAML::Value << YAML::Flow << YAML::BeginMap;
-        emit << YAML::Key << "x" << YAML::Value << clip.Pivot.x;
-        emit << YAML::Key << "y" << YAML::Value << clip.Pivot.y;
-        emit << YAML::EndMap;
-        emit << YAML::Key << "fps" << YAML::Value << clip.FPS;
-        emit << YAML::Key << "frames" << YAML::Value << YAML::Flow << YAML::BeginSeq;
-        for (i32 frame : clip.Frames) {
-            emit << frame;
-        }
-        emit << YAML::EndSeq;
-        emit << YAML::EndMap;
-    }
-    emit << YAML::EndSeq;
-    emit << YAML::EndMap;
-
-    if (!WriteFile(yml_path, std::span<const u8>((const u8*)emit.c_str(), emit.size()))) {
-        LogError("SpriteSheetAsset: cannot write manifest '%s'", yml_path.Str());
-        return false;
-    }
-    return true;
-}
+bool SpriteSheetAsset::SaveManifest() { return SaveAssetManifest(this); }
 
 bool SpriteSheetAsset::ResolveReferences(AssetRegistry& registry) {
     bool all_resolved = true;

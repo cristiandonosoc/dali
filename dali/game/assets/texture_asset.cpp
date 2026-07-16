@@ -3,54 +3,31 @@
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
 #include <dali/game/platform.h>
+#include <dali/game/serde.h>
 
 #include <stb/stb_image.h>
-#include <yaml-cpp/yaml.h>
 
 namespace kdk {
 
-namespace texture_asset_private {
+void TextureImportSettings::Serialize(SerdeArchive* sa) { SERDE(sa, this, FlipVertically); }
 
-// Emits the texture manifest to disk (creating parent directories). Shared by Import and
-// SaveManifest so the schema lives in one place.
-bool WriteManifest(Arena* arena,
-                   AssetId id,
-                   StringView source,
-                   i32 width,
-                   i32 height,
-                   i32 channels,
-                   ETextureFilter filter,
-                   bool flip) {
-    StringView yml_path = AssetYmlPath(arena, id);
-
-    YAML::Emitter emit;
-    emit << YAML::BeginMap;
-    emit << YAML::Key << "type" << YAML::Value << ToString(TextureAsset::kAssetType).Str();
-    emit << YAML::Key << "version" << YAML::Value << TextureAsset::kVersion;
-    emit << YAML::Key << "id" << YAML::Value << id.Value.Str();
-    emit << YAML::Key << "source" << YAML::Value << source.Str();
-    emit << YAML::Key << "width" << YAML::Value << width;
-    emit << YAML::Key << "height" << YAML::Value << height;
-    emit << YAML::Key << "channels" << YAML::Value << channels;
-    emit << YAML::Key << "flip" << YAML::Value << (flip ? 1 : 0);
-    emit << YAML::Key << "filter" << YAML::Value << (i32)filter;
-    emit << YAML::EndMap;
-
-    if (!WriteFile(yml_path, std::span<const u8>((const u8*)emit.c_str(), emit.size()))) {
-        LogError("TextureAsset: cannot write manifest '%s'", yml_path.Str());
-        return false;
-    }
-    return true;
+void TextureAsset::Serialize(SerdeArchive* sa) {
+    SERDE(sa, this, Manifest);
+    SERDE(sa, this, Settings);
+    // Dimensions/channels/filter describe the payload and ARE the Resource's own state - the asset
+    // keeps no second copy. Serializing them in place means saving reads the live GL object, and
+    // loading leaves them sitting in a blank Resource for LoadFromDisk to hand to FromPixels. Handle
+    // is deliberately absent: it is a GL name, meaningless across runs.
+    Serde(sa, "Width", &Resource.Width);
+    Serde(sa, "Height", &Resource.Height);
+    Serde(sa, "Channels", &Resource.Channels);
+    Serde(sa, "Filter", &Resource.Filter);
 }
-
-}  // namespace texture_asset_private
 
 bool TextureAsset::Import(StringView source_raw,
                           AssetId id,
                           const TextureImportSettings& settings,
                           ETextureFilter filter) {
-    using namespace texture_asset_private;
-
     if (!id.IsValid()) {
         LogError("TextureAsset::Import: non-canonical id '%s'", id.Value.Str());
         return false;
@@ -85,7 +62,20 @@ bool TextureAsset::Import(StringView source_raw,
         return false;
     }
 
-    if (!WriteManifest(arena, id, source_raw, width, height, channels, filter, settings.FlipVertically)) {
+    // The manifest is written through the same path as any other save, so an imported .yml and a
+    // re-saved one cannot disagree. Resource stands in as the dims carrier here; nothing is uploaded.
+    TextureAsset asset = {};
+    asset.Manifest.Type = kAssetType;
+    asset.Manifest.Version = kVersion;
+    asset.Manifest.Id = id;
+    asset.Manifest.Source.Set(source_raw);
+    asset.Manifest.HasPayload = kHasPayload;
+    asset.Settings = settings;
+    asset.Resource.Width = width;
+    asset.Resource.Height = height;
+    asset.Resource.Channels = channels;
+    asset.Resource.Filter = filter;
+    if (!asset.SaveManifest()) {
         return false;
     }
 
@@ -94,55 +84,16 @@ bool TextureAsset::Import(StringView source_raw,
 }
 
 std::optional<TextureAsset> TextureAsset::LoadFromDisk(AssetId id) {
-    using namespace texture_asset_private;
-
     auto scratch = Arena::GetScratch();
     Arena* arena = scratch;
 
-    FileContents yml = ReadFile(arena, AssetYmlPath(arena, id));
-    if (!yml.IsValid()) {
-        return std::nullopt;
-    }
-    YAML::Node node = YAML::Load((const char*)yml.Data.data());
-
-    // We build without exceptions: as<T>(fallback) never throws on a missing/mistyped field.
-    EAssetType type = AssetTypeFromString(StringView(node["type"].as<std::string>("invalid").c_str()));
-    if (type != kAssetType) {
-        return std::nullopt;  // Not our kind; another loader may claim it.
-    }
-
-    i32 version = node["version"].as<int>(0);
-    if (version != kVersion) {
-        LogError("TextureAsset: '%s' is version %d, expected %d - re-import needed",
-                 id.Value.Str(),
-                 version,
-                 kVersion);
+    std::optional<TextureAsset> asset = LoadAssetFromDisk<TextureAsset>(id);
+    if (!asset) {
         return std::nullopt;
     }
 
-    // The manifest embeds its own id; it must match the id derived from the file's path.
-    AssetId stored = AssetId::Normalize(StringView(node["id"].as<std::string>("").c_str()));
-    if (!(stored == id)) {
-        LogError("TextureAsset: id mismatch - manifest says '%s' but lives at '%s'",
-                 stored.Value.Str(),
-                 id.Value.Str());
-    }
-
-    // Dimensions/channels/filter describe the payload and become the Resource's own state; they are
-    // read into locals here rather than kept as separate asset members.
-    i32 width = node["width"].as<int>(0);
-    i32 height = node["height"].as<int>(0);
-    i32 channels = node["channels"].as<int>(0);
-    ETextureFilter filter = (ETextureFilter)node["filter"].as<int>(0);
-
-    TextureAsset asset = {};
-    asset.Manifest.Type = kAssetType;
-    asset.Manifest.Version = version;
-    asset.Manifest.Id = id;
-    asset.Manifest.Source = StringView(node["source"].as<std::string>("").c_str());
-    asset.Manifest.HasPayload = true;
-    asset.Settings.FlipVertically = node["flip"].as<int>(0) != 0;
-
+    // The envelope stops at the manifest; only the type that HAS a payload knows how to finish. The
+    // dims Serialize left in Resource say how to read the pixels back.
     StringView asset_path = AssetPayloadPath(arena, id);
     FileContents payload = ReadFile(arena, asset_path);
     if (!payload.IsValid()) {
@@ -150,27 +101,16 @@ std::optional<TextureAsset> TextureAsset::LoadFromDisk(AssetId id) {
         return std::nullopt;
     }
 
-    asset.Resource = Texture::FromPixels(payload.Data, width, height, channels, filter);
-    if (!asset.Resource.IsValid()) {
+    Texture info = asset->Resource;
+    asset->Resource =
+        Texture::FromPixels(payload.Data, info.Width, info.Height, info.Channels, info.Filter);
+    if (!asset->Resource.IsValid()) {
         return std::nullopt;
     }
     return asset;
 }
 
-bool TextureAsset::SaveManifest() const {
-    using namespace texture_asset_private;
-
-    auto scratch = Arena::GetScratch();
-    Arena* arena = scratch;
-    return WriteManifest(arena,
-                         Manifest.Id,
-                         Manifest.Source.ToString(),
-                         Resource.Width,
-                         Resource.Height,
-                         Resource.Channels,
-                         Resource.Filter,
-                         Settings.FlipVertically);
-}
+bool TextureAsset::SaveManifest() { return SaveAssetManifest(this); }
 
 bool TextureAsset::Reimport() {
     if (Manifest.Source.IsEmpty()) {
