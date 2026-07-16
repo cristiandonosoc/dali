@@ -98,6 +98,7 @@ struct SpriteSheetAsset {
     static constexpr EAssetType kAssetType = EAssetType::SpriteSheet;
     static constexpr i32 kVersion = 3;
     static constexpr StringView kIdRoot = "spritesheets"sv;
+    static constexpr bool kHasPayload = false;  // Composing asset: yml only.
     static constexpr i32 kMaxClips = 64;
 
     AssetManifest Manifest = {};

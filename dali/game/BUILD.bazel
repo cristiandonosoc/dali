@@ -65,6 +65,7 @@ cc_test(
 cc_test(
     name = "serde_test",
     srcs = [
+        "assets/asset_serde_test.cpp",
         "serde_test.cpp",
     ],
     testonly = True,

@@ -23,6 +23,8 @@ struct TextureAsset {
     // suggest an id from a raw source path (the id's first directory is the asset type, not the
     // source's).
     static constexpr StringView kIdRoot = "textures"sv;
+    // The only asset type with a baked payload beside its .yml (<id>.asset, tightly-packed pixels).
+    static constexpr bool kHasPayload = true;
 
     AssetManifest Manifest = {};
     TextureImportSettings Settings = {};

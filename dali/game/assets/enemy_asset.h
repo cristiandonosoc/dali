@@ -43,6 +43,7 @@ struct EnemyAsset {
     static constexpr EAssetType kAssetType = EAssetType::Enemy;
     static constexpr i32 kVersion = 2;
     static constexpr StringView kIdRoot = "enemies"sv;
+    static constexpr bool kHasPayload = false;  // Composing asset: yml only.
 
     AssetManifest Manifest = {};
 

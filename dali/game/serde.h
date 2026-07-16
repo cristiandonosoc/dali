@@ -237,6 +237,7 @@ void SerdeYaml(SerdeArchive* sa, const char* name, FixedString<CAPACITY>* value)
 template <>
 void SerdeYaml<StringView>(SerdeArchive* sa, const char* name, StringView* value);
 
+
 // MATH / COLOR ------------------------------------------------------------------------------------
 
 template <>
@@ -410,6 +411,37 @@ void Serde(SerdeArchive* sa, const char* name, T* value) {
         case ESerdeBackend::Invalid: ASSERT(false); break;
         case ESerdeBackend::YAML: serde::SerdeYaml(sa, name, value); break;
     }
+}
+
+// Reads/writes the value being serialized as ONE scalar string, rather than as a field list. This is
+// what a type that is an IDENTIFIER rather than a record calls from its `Serialize` member, so it
+// lands as `Id: textures/goblin` instead of the `Id: {Value: textures/goblin}` a SERDE list would
+// produce (see AssetId::Serialize).
+//
+// Only valid from inside a `Serialize` member: the node it writes is the one the caller already
+// created for this value, which is why it takes no key.
+template <u64 CAPACITY>
+void SerdeScalarString(SerdeArchive* sa, FixedString<CAPACITY>* value) {
+    ASSERT(sa->Backend == ESerdeBackend::YAML);
+
+    YAML::Node* current = sa->CurrentNode();
+    if (sa->Mode == ESerdeMode::Serialize) {
+        *current = value->Str();
+        return;
+    }
+
+    std::string str;
+    if (!serde::DecodeNode(sa, "<scalar>", *current, &str)) {
+        *value = {};
+        return;
+    }
+    if (str.size() >= CAPACITY) {
+        sa->AddError(Printf(sa->TempArena,
+                            "scalar of %llu does not fit FixedString<%llu> (truncated)",
+                            (u64)str.size(),
+                            CAPACITY));
+    }
+    value->Set(StringView(str.c_str(), str.size()));
 }
 
 }  // namespace kdk

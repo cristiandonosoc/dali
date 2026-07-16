@@ -13,6 +13,7 @@ struct TowerAsset {
     static constexpr EAssetType kAssetType = EAssetType::Tower;
     static constexpr i32 kVersion = 1;
     static constexpr StringView kIdRoot = "towers"sv;
+    static constexpr bool kHasPayload = false;  // Composing asset: yml only.
 
     AssetManifest Manifest = {};
 
