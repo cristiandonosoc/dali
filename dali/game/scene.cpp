@@ -1,6 +1,7 @@
 #include <dali/game/scene.h>
 
 #include <dali/core/memory.h>
+#include <dali/game/assets/registry.h>
 #include <dali/game/platform.h>
 
 #include <yaml-cpp/yaml.h>
@@ -38,7 +39,7 @@ bool SaveScene(const World& world, StringView path) {
     return WriteFile(path, std::span<const u8>((const u8*)out.c_str(), out.size()));
 }
 
-bool LoadScene(World* world, StringView path) {
+bool LoadScene(World* world, AssetRegistry* registry, StringView path) {
     auto scratch = Arena::GetScratch();
     FileContents contents = ReadFile(scratch, path);
     if (!contents.IsValid()) {
@@ -60,6 +61,11 @@ bool LoadScene(World* world, StringView path) {
     if (root["goal"] && root["goal"].size() == 2) {
         world->Goal = Hex{root["goal"][0].as<int>(0), root["goal"][1].as<int>(0)};
     }
+    // The scene stores no per-tile blueprint, so every tower in it is World::DefaultTower. Resolve
+    // once up front; a missing asset falls back to default stats, matching the placement path.
+    const TowerAsset* found = registry->FindTowerAsset(world->DefaultTower);
+    TowerAsset tower_blueprint = found ? *found : TowerAsset{};
+
     if (root["tiles"]) {
         for (const auto& node : root["tiles"]) {
             Hex hex{node["q"].as<int>(0), node["r"].as<int>(0)};
@@ -73,9 +79,9 @@ bool LoadScene(World* world, StringView path) {
             if (content == ETileContent::Spawner) {
                 MakeSpawner(tile);  // re-seed the random phase offset on load
             } else if (content == ETileContent::Tower) {
-                MakeTower(tile);
+                MakeTower(tile, tower_blueprint);
             } else {
-                tile->Content = content;
+                ClearTileContent(tile);
             }
         }
     }

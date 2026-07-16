@@ -20,15 +20,12 @@ namespace kdk {
 // world unit is one pixel.
 constexpr float kHexSize = 60.0f;
 
-// Tower tuning. Range is in world units (pixels); at kHexSize=60 a range of 180 reaches ~3 tiles.
-constexpr float kTowerRange = 180.0f;
-constexpr float kTowerFireInterval = 0.6f;    // Seconds between shots.
-constexpr float kTowerDamage = 5.0f;          // Per projectile; enemies start at 10 HP.
-constexpr float kProjectileHitRadius = 8.0f;  // Distance at which a projectile connects.
+// Tower tuning (range, fire interval, damage, projectile hit radius, cost) is authored per
+// blueprint on TowerAsset::InstanceData and snapshotted onto each Tower at placement — there are no
+// tower constants here.
 
 // Economy + wave tuning.
 constexpr int kStartingGold = 100;                // Gold the player begins a run with.
-constexpr int kTowerCost = 40;                    // Gold to place one tower.
 constexpr int kWaveBaseCount = 5;                 // Enemies in wave 1; grows by 1 each wave.
 constexpr float kWaveHealthScalePerWave = 0.15f;  // +15% enemy HP for each wave past the first.
 
@@ -98,8 +95,6 @@ struct DrawContext {
     ImDrawList* DrawList;
     // for live-resolving asset references at draw
     AssetRegistry* Registry = nullptr;
-    // resolved once/frame; every tower draws its idle clip
-    const TowerAsset* DefaultTower = nullptr;
 
     Vec2 Origin;
     float Zoom = 1;
@@ -246,15 +241,12 @@ void DrawEnemy(DrawContext* dc, const Enemy& enemy) {
     }
 }
 
-void DrawTower(DrawContext* dc, const Tile& tile) {
+void DrawTower(DrawContext* dc, const Tile& tile, const Tower& tower) {
     ImVec2 center = dc->TileCenter(tile.Hex);
-    // The tower's idle animation, from its blueprint (resolved once per frame onto the context;
-    // every tower is one type for now, so they share it). Falls back to a placeholder disc when
-    // no blueprint/clip resolves, so an art-less tower is still visible.
-    const SpriteSheetClip* clip = nullptr;
-    if (dc->DefaultTower) {
-        clip = dc->DefaultTower->PerInstanceData.IdleClip.Resolve(*dc->Registry);
-    }
+    // The tower's idle animation, from the blueprint it snapshotted at placement (resolved live, so
+    // editing the sheet shows up immediately). Falls back to a placeholder disc when no clip
+    // resolves, so an art-less tower is still visible.
+    const SpriteSheetClip* clip = tower.Data.IdleClip.Resolve(*dc->Registry);
 
     i32 pos = NONE;
 
@@ -271,7 +263,7 @@ void DrawTower(DrawContext* dc, const Tile& tile) {
         FrameUv frameuv = clip->_Frames[pos];
         ImVec2 uv0 = ToImVec2(frameuv.Uv0);
         ImVec2 uv1 = ToImVec2(frameuv.Uv1);
-        if (dc->DefaultTower->PerInstanceData.IdleClip.FlipX) {
+        if (tower.Data.IdleClip.FlipX) {
             // Swapping the U bounds mirrors horizontally (ImGui samples min.u -> max.u).
             float u = uv0.x;
             uv0.x = uv1.x;
@@ -301,7 +293,7 @@ void DrawTower(DrawContext* dc, const Tile& tile) {
     // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
     // visible at a glance.
     char cooldown_label[16];
-    snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tile.FireCooldown);
+    snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tower.FireCooldown);
     dc->DrawList->AddText(ImVec2(center.x + 12.0f * dc->Zoom, center.y - 8.0f * dc->Zoom),
                           Color32::White.Bits,
                           cooldown_label);
@@ -313,11 +305,13 @@ void DrawTileContent(DrawContext* dc, const Tile& tile, const Hex& hovered) {
         dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::Green.Bits);
         dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
     } else if (tile.Content == ETileContent::Tower) {
-        DrawTower(dc, tile);
+        ASSERT(tile.Tower.has_value());  // MakeTower/ClearTileContent keep these in step
+        const Tower& tower = *tile.Tower;
+        DrawTower(dc, tile, tower);
 
         // The range ring only shows while hovering this tower, so a dense field stays readable.
         if (tile.Hex == hovered) {
-            dc->DrawList->AddCircle(center, kTowerRange * dc->Zoom, Color32::Cyan.Bits, 0, 2.0f);
+            dc->DrawList->AddCircle(center, tower.Data.Range * dc->Zoom, Color32::Cyan.Bits, 0, 2.0f);
         }
     }
 }
@@ -344,7 +338,6 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps,
     ImDrawList* _draw_list = ImGui::GetBackgroundDrawList();
     DrawContext dc(_draw_list, registry, origin, zoom);
     dc.Time = ps->TimeTracking.TotalSeconds;
-    dc.DefaultTower = registry->FindTowerAsset(world->DefaultTower);
     dc.ShowBounds = io.KeyCtrl;
 
     // // World->screen: the sim is in zoom-independent world units; pixels are origin + world *
@@ -596,9 +589,20 @@ void MakeSpawner(Tile* tile) {
     tile->SpawnTimer = random::FloatUNI();  // phase offset in [0,1)s so spawners don't sync up
 }
 
-void MakeTower(Tile* tile) {
+void MakeTower(Tile* tile, const TowerAsset& blueprint) {
+    Tower tower = {};
+    tower.Data = blueprint.PerInstanceData;  // snapshot the stats; the blueprint is not retained
+    tower.FireCooldown = 0.0f;               // ready to fire the moment an enemy walks into range
+    tower.Blueprint = blueprint.Manifest.Id;
+
     tile->Content = ETileContent::Tower;
-    tile->FireCooldown = 0.0f;  // ready to fire the moment an enemy walks into range
+    tile->Tower = tower;
+}
+
+void ClearTileContent(Tile* tile) {
+    tile->Content = ETileContent::None;
+    tile->Tower.reset();
+    tile->SpawnTimer = 0.0f;
 }
 
 void World::BeginRun() {
@@ -609,7 +613,7 @@ void World::BeginRun() {
     Projectiles.Clear();
 
     // Start with no towers; PreGame only lays out terrain (path + goal).
-    Grid.ForEachTile([](Tile* tile) { tile->Content = ETileContent::None; });
+    Grid.ForEachTile([](Tile* tile) { ClearTileContent(tile); });
 
     CalculatePath();
     CollectSpawnSources();
@@ -663,10 +667,10 @@ void World::ArmNextWave() {
 
 void World::ResetTowerCooldowns() {
     Grid.ForEachTile([](Tile* tile) {
-        if (tile->Content != ETileContent::Tower) {
+        if (!tile->Tower.has_value()) {
             return;
         }
-        tile->FireCooldown = 0.0f;
+        tile->Tower->FireCooldown = 0.0f;
     });
 }
 
@@ -746,27 +750,28 @@ void World::UpdateTowers(float dt) {
     }
 
     Grid.ForEachTile([&](Tile* tile) {
-        if (tile->Content != ETileContent::Tower) {
+        if (!tile->Tower.has_value()) {
             return;
         }
+        Tower& tower = *tile->Tower;
 
-        tile->FireCooldown -= dt;
-        if (tile->FireCooldown > 0.0f) {
+        tower.FireCooldown -= dt;
+        if (tower.FireCooldown > 0.0f) {
             return;  // still cooling down
         }
         // Ready to fire. Clamp to 0 so a tower with no target in range holds at "ready" instead of
         // drifting ever more negative while it waits.
-        tile->FireCooldown = 0.0f;
+        tower.FireCooldown = 0.0f;
 
         // Among enemies in range, pick the one closest to the base. Compare squared distances to
         // skip the sqrt.
         Vec2 tower_pos = Hex::HexToWorld(kHexSize, tile->Hex);
-        constexpr float kRangeSq = kTowerRange * kTowerRange;
+        float range_sq = tower.Data.Range * tower.Data.Range;
         Enemy* target = nullptr;
         float best_priority = 0.0f;  // lower wins; meaning depends on goal_pos
         for (Enemy& enemy : Enemies) {
             float d_sq = LengthSq(enemy.Position - tower_pos);
-            if (d_sq > kRangeSq) {
+            if (d_sq > range_sq) {
                 continue;  // out of range
             }
             float priority = goal_pos.has_value() ? LengthSq(enemy.Position - *goal_pos) : d_sq;
@@ -785,9 +790,10 @@ void World::UpdateTowers(float dt) {
         projectile.LastSeen =
             target->Position;  // seed; refreshed each frame while the target lives
         projectile.TargetId = target->Id;
-        projectile.Damage = kTowerDamage;
+        projectile.Damage = tower.Data.Damage;
+        projectile.HitRadius = tower.Data.ProjectileHitRadius;
         Projectiles.Push(projectile);
-        tile->FireCooldown = kTowerFireInterval;
+        tower.FireCooldown = tower.Data.FireInterval;
     });
 }
 
@@ -803,7 +809,7 @@ void World::UpdateProjectiles(float dt) {
         }
 
         Vec2 delta = projectile.LastSeen - projectile.Position;
-        if (LengthSq(delta) <= kProjectileHitRadius * kProjectileHitRadius) {
+        if (LengthSq(delta) <= projectile.HitRadius * projectile.HitRadius) {
             // Reached the aim point. Only deal damage if the target is still there to take it.
             if (target) {
                 target->Health -= projectile.Damage;
@@ -827,23 +833,24 @@ constexpr StringView kScenePath = "extras/scene.yaml"sv;
 void GameInit(PlatformState* ps, GameState* gs) {
     (void)ps;
 
-    // Reload the last saved scene; fall back to an empty grid the first time (no file yet). The
-    // player lays out the path/goal in the PreGame editor.
-    if (!LoadScene(&gs->World, kScenePath)) {
-        gs->World.Grid.Init();
-    }
-    gs->World.CollectSpawnSources();  // so the outskirts are visible before the first path edit
-
     // Load all baked assets once. GL is already live (OnSOLoaded ran first), and the registry lives
-    // in the PermanentArena, so this does not repeat on reload.
+    // in the PermanentArena, so this does not repeat on reload. This runs before LoadScene, which
+    // stamps scene towers from the registry.
     gs->Registry.CrawlAndLoad();
 
     // The blueprint waves spawn until wave-composition exists. If the asset is absent, UpdateWave
     // falls back to a default-stat enemy, so this id being unresolved is not fatal.
     gs->World.DefaultEnemy = AssetId::Normalize("enemies/wolf"sv);
-    // The blueprint every placed tower draws its idle graphics from (behaviour still uses the
-    // kTower* constants). Unresolved is not fatal — the tower falls back to a placeholder disc.
+    // The blueprint the build cursor places, until a build menu exists. Unresolved is not fatal —
+    // the tower falls back to default stats and a placeholder disc.
     gs->World.DefaultTower = AssetId::Normalize("towers/arrow"sv);
+
+    // Reload the last saved scene; fall back to an empty grid the first time (no file yet). The
+    // player lays out the path/goal in the PreGame editor.
+    if (!LoadScene(&gs->World, &gs->Registry, kScenePath)) {
+        gs->World.Grid.Init();
+    }
+    gs->World.CollectSpawnSources();  // so the outskirts are visible before the first path edit
 
     printf("[game] GameInit\n");
 }
@@ -945,6 +952,18 @@ StringView ToString(EGamePhase phase) {
 
 namespace game_private {
 
+// The blueprint the build cursor places (World::DefaultTower). Resolving happens here rather than in
+// the sim, which stays registry-agnostic; a missing asset resolves to default stats so the game
+// still runs before any tower asset is authored. By value: TowerAsset is a small value blob and
+// placement happens at click rate, which buys a caller-side fallback local at every site.
+TowerAsset ResolveDefaultTower(const World& world, AssetRegistry* registry) {
+    const TowerAsset* blueprint = registry->FindTowerAsset(world.DefaultTower);
+    if (!blueprint) {
+        return {};
+    }
+    return *blueprint;
+}
+
 // Adds a new chunk adjacent to the existing grid, in the direction of |clicked|. Chunk centers sit
 // on the super-hex lattice (see TileChunk::NeighbourChunkOffset) so the clusters tile gaplessly and
 // never overlap: it snaps to the neighbour slot of the nearest chunk that best faces the click.
@@ -1028,7 +1047,7 @@ void ApplyEditorOp(GameState* gs, Hex hex) {
         }
         case EOperationMode::ToggleSpawner: {
             if (tile->Content == ETileContent::Spawner) {
-                tile->Content = ETileContent::None;
+                ClearTileContent(tile);
             } else if (tile->IsPath) {
                 // Only path tiles can host a spawner. Placing it replaces any other content.
                 MakeSpawner(tile);
@@ -1037,10 +1056,10 @@ void ApplyEditorOp(GameState* gs, Hex hex) {
         }
         case EOperationMode::ToggleTower: {
             if (tile->Content == ETileContent::Tower) {
-                tile->Content = ETileContent::None;
+                ClearTileContent(tile);
             } else if (!tile->IsPath) {
                 // Towers guard the path from beside it, so they only go on non-path tiles.
-                MakeTower(tile);
+                MakeTower(tile, ResolveDefaultTower(gs->World, &gs->Registry));
             }
             break;
         }
@@ -1050,8 +1069,9 @@ void ApplyEditorOp(GameState* gs, Hex hex) {
     }
 }
 
-// Build-phase interaction: buy a tower on an empty, non-path tile if the player can afford it.
-void TryBuyTower(World* world, Hex hex) {
+// Build-phase interaction: buy a tower on an empty, non-path tile if the player can afford it. The
+// price is the blueprint's, so it is whatever the tower being placed costs.
+void TryBuyTower(World* world, AssetRegistry* registry, Hex hex) {
     Tile* tile = world->Grid.FindTile(hex);
     if (!tile) {
         return;
@@ -1062,11 +1082,12 @@ void TryBuyTower(World* world, Hex hex) {
     if (tile->Content != ETileContent::None) {
         return;
     }
-    if (world->Gold < kTowerCost) {
+    TowerAsset blueprint = ResolveDefaultTower(*world, registry);
+    if (world->Gold < blueprint.PerInstanceData.Cost) {
         return;
     }
-    world->Gold -= kTowerCost;
-    MakeTower(tile);
+    world->Gold -= blueprint.PerInstanceData.Cost;
+    MakeTower(tile, blueprint);
 }
 
 // Rebuilds + restages the game DLL by running reload.bat (which the running platform notices and
@@ -1227,7 +1248,7 @@ void GameRender(PlatformState* ps, GameState* gs) {
                 break;
             }
             case EGamePhase::Build: {
-                TryBuyTower(&world, *clicked_hex);
+                TryBuyTower(&world, &gs->Registry, *clicked_hex);
                 break;
             }
             case EGamePhase::Wave:
@@ -1271,7 +1292,7 @@ void GameRender(PlatformState* ps, GameState* gs) {
             }
             ImGui::SameLine();
             if (ImGui::Button("Load Scene")) {
-                LoadScene(&world, kScenePath);
+                LoadScene(&world, &gs->Registry, kScenePath);
             }
 
             // Lock in the terrain and start the run, but only if there's a goal and at least one
@@ -1289,7 +1310,8 @@ void GameRender(PlatformState* ps, GameState* gs) {
             break;
         }
         case EGamePhase::Build: {
-            ImGui::Text("Click an empty tile to build a tower (%d gold).", kTowerCost);
+            ImGui::Text("Click an empty tile to build a tower (%d gold).",
+                        ResolveDefaultTower(world, &gs->Registry).PerInstanceData.Cost);
             if (ImGui::Button("Start Wave")) {
                 world.ArmNextWave();
                 gs->Phase = EGamePhase::Wave;

@@ -16,13 +16,19 @@ struct TowerAsset {
 
     AssetManifest Manifest = {};
 
+    // The stats copied verbatim from a TowerAsset (the blueprint) onto a placed Tower. This struct
+    // IS the placement-snapshot boundary: every field here is snapshotted, so the idle-clip
+    // reference travels with each placed tower (resolved live at draw, never a cached pointer).
+    // Applying a blueprint is a single memberwise copy (tower.Data = asset.PerInstanceData), so a
+    // new stat is added in exactly one place and cannot be forgotten. Live per-tower state (e.g.
+    // FireCooldown) does NOT belong here — it lives on Tower.
     struct InstanceData {
-        float Range = 180.0f;
-        float FireInterval = 2.0f;
-        float Damage = 5.0f;
-        float ProjectileHitRadius = 8.0f;
+        float Range = 180.0f;        // world units; at kHexSize=60 a range of 180 reaches ~3 tiles
+        float FireInterval = 0.6f;   // seconds between shots; Tower::FireCooldown counts this down
+        float Damage = 5.0f;         // per projectile; enemies start at 10 HP
+        float ProjectileHitRadius = 8.0f;  // distance at which this tower's shots connect
 
-        int Cost = 40;
+        int Cost = 40;  // gold to place one
 
         SpriteSheetClipReference IdleClip = {};
     };

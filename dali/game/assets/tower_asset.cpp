@@ -35,9 +35,9 @@ TowerAsset::InstanceData ParseInstanceData(const YAML::Node& node) {
     return data;
 }
 
-// The idle animation serializes as an "idle:" sub-map ({sprite_sheet, clip}). The clip is looked up
-// live at draw via SpriteSheetClipReference::Resolve, so nothing here needs relinking. The whole
-// block is omitted when no sheet is set.
+// The idle animation serializes as an "idle:" sub-map ({sprite_sheet, clip, flip_x}). The clip is
+// looked up live at draw via SpriteSheetClipReference::Resolve, so nothing here needs relinking. The
+// whole block is omitted when no sheet is set.
 void EmitIdleClip(YAML::Emitter& emit, const SpriteSheetClipReference& clip) {
     if (!clip.SpriteSheetId.IsValid()) {
         return;
@@ -45,6 +45,7 @@ void EmitIdleClip(YAML::Emitter& emit, const SpriteSheetClipReference& clip) {
     emit << YAML::Key << "idle" << YAML::Value << YAML::BeginMap;
     emit << YAML::Key << "sprite_sheet" << YAML::Value << clip.SpriteSheetId.Value.Str();
     emit << YAML::Key << "clip" << YAML::Value << clip.ClipName.Str();
+    emit << YAML::Key << "flip_x" << YAML::Value << clip.FlipX;
     emit << YAML::EndMap;
 }
 
@@ -57,6 +58,7 @@ SpriteSheetClipReference ParseIdleClip(const YAML::Node& node) {
     clip.SpriteSheetId =
         AssetId::Normalize(StringView(idle["sprite_sheet"].as<std::string>("").c_str()));
     clip.ClipName = StringView(idle["clip"].as<std::string>("").c_str());
+    clip.FlipX = idle["flip_x"].as<bool>(false);  // optional; sheets authored before flip default off
     return clip;
 }
 

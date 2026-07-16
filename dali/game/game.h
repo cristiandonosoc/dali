@@ -4,6 +4,7 @@
 #include <dali/core/string.h>
 #include <dali/game/assets/asset_editor.h>
 #include <dali/game/assets/enemy_asset.h>
+#include <dali/game/assets/tower_asset.h>
 #include <dali/game/hex.h>
 
 #include <optional>
@@ -19,6 +20,20 @@ enum class ETileContent : u8 {
     Tower,
 };
 
+// A tower placed on a tile. Mirrors Enemy: Data is the blueprint snapshot taken at placement, every
+// other field is live state that only a placed tower has.
+struct Tower {
+    // Stats snapshotted from the blueprint at placement (range, fire interval, damage, cost, idle
+    // clip). A blueprint edit does not retroactively change towers already placed.
+    TowerAsset::InstanceData Data = {};
+    // Seconds until it can fire again. Counts down; a shot resets it to Data.FireInterval. Live
+    // runtime state, not part of the placement snapshot — that's why it lives here, not in Data.
+    float FireCooldown = 0.0f;
+    // Which TowerAsset stamped this. The live link back to the blueprint (a stable id, not a
+    // pointer, so it survives a re-crawl / DLL reload).
+    AssetId Blueprint = {};
+};
+
 struct Tile {
     Hex Hex = {};
     bool IsPath = false;
@@ -28,9 +43,9 @@ struct Tile {
     // Seconds accumulated toward this spawner's next spawn. Seeded with a random phase offset (see
     // MakeSpawner) so spawners fire out of sync. Only meaningful when Content == Spawner.
     float SpawnTimer = 0.0f;
-    // Seconds until this tower can fire again. Counts down; a shot resets it to the fire interval.
-    // Only meaningful when Content == Tower.
-    float FireCooldown = 0.0f;
+    // The placed tower's state. Present iff Content == Tower — Content stays the discriminator, this
+    // is its payload. Never assign either by hand: MakeTower / ClearTileContent keep them in step.
+    std::optional<Tower> Tower = {};
 };
 
 struct TileChunk {
@@ -112,7 +127,10 @@ struct Projectile {
         {};            // Target's position as of the last frame it was alive; the shot flies here.
     u32 TargetId = 0;  // The enemy this shot is chasing.
     float Speed = 320.0f;  // Pixels per second.
+    // Snapshotted from the firing tower's blueprint, so a shot keeps the stats of the tower that
+    // fired it even if that tower is sold or its blueprint edited mid-flight.
     float Damage = 5.0f;
+    float HitRadius = 8.0f;  // Distance at which this shot connects.
 };
 
 // One wave of enemies: a finite burst emitted from the map's spawn sources during the Wave phase.
@@ -145,9 +163,10 @@ struct World {
     // exists. Set in GameInit; resolved against the registry by the caller, which passes the
     // blueprint into UpdateWave (the sim stays registry-agnostic).
     AssetId DefaultEnemy = {};
-    // The tower blueprint every placed tower draws from. Graphics only for now (its idle clip);
-    // gameplay still runs off the kTower* constants, so behaviour is unchanged. Set in GameInit,
-    // resolved against the registry at draw time (the sim stays registry-agnostic).
+    // The blueprint the build cursor places, until a build menu (tower picking) exists. Placed
+    // towers snapshot it and thereafter run off their own Tower::Data, so this is only read at
+    // placement. Set in GameInit; resolved against the registry by the caller, which passes the
+    // blueprint into MakeTower (the sim stays registry-agnostic).
     AssetId DefaultTower = {};
     FixedVector<Projectile, kMaxProjectiles> Projectiles = {};
 
@@ -193,8 +212,13 @@ struct World {
 // spawners fire out of sync instead of stacking enemies. Use this instead of setting Content by
 // hand.
 void MakeSpawner(Tile* tile);
-// Marks |tile| as a tower, ready to fire immediately. Use this instead of setting Content by hand.
-void MakeTower(Tile* tile);
+// Stamps a tower from |blueprint| onto |tile|, ready to fire immediately, snapshotting its stats.
+// The sim never looks the blueprint up itself (mirrors World::SpawnEnemy). Use this instead of
+// setting Content by hand — it is what keeps Content and Tile::Tower in step.
+void MakeTower(Tile* tile, const TowerAsset& blueprint);
+// Empties |tile| of whatever it held, clearing the content payload with it. The one way to set
+// Content back to None, so the payload can't outlive its discriminator.
+void ClearTileContent(Tile* tile);
 
 enum class EOperationMode : u8 {
     TogglePath,

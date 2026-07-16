@@ -3,7 +3,7 @@ version: 1
 id: towers/arrow
 instance:
   range: 180
-  fire_interval: 2
+  fire_interval: 0.6
   damage: 5
   projectile_hit_radius: 8
   cost: 40
