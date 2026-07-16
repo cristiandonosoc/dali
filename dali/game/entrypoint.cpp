@@ -2,7 +2,7 @@
 
 #include <dali/core/api.h>
 #include <dali/game/graphics/gl.h>
-#include <dali/game/platform_state.h>
+#include <dali/game/platform.h>
 
 #include <imgui.h>
 

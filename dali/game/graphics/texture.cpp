@@ -1,6 +1,6 @@
 #include <dali/game/graphics/texture.h>
 
-#include <dali/game/log.h>
+#include <dali/game/platform.h>
 
 #include <glad/gl.h>
 #include <stb/stb_image.h>

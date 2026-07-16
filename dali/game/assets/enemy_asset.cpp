@@ -2,8 +2,7 @@
 
 #include <dali/core/memory.h>
 #include <dali/game/assets/registry.h>
-#include <dali/game/file.h>
-#include <dali/game/log.h>
+#include <dali/game/platform.h>
 
 #include <yaml-cpp/yaml.h>
 
@@ -117,8 +116,8 @@ constexpr StringView kFacingKeys[(i32)EFacing::COUNT] = {
 // whole block when every slot is empty — are omitted.
 void EmitWalkClips(YAML::Emitter& emit, const WalkClips& walk) {
     bool any = false;
-    for (const DirectionalClip& slot : walk.ByFacing) {
-        any |= slot.Clip.SpriteSheetId.IsValid();
+    for (const SpriteSheetClipReference& slot : walk.ByFacing) {
+        any |= slot.SpriteSheetId.IsValid();
     }
     if (!any) {
         return;
@@ -126,13 +125,13 @@ void EmitWalkClips(YAML::Emitter& emit, const WalkClips& walk) {
 
     emit << YAML::Key << "walk" << YAML::Value << YAML::BeginMap;
     for (i32 i = 0; i < (i32)EFacing::COUNT; ++i) {
-        const DirectionalClip& slot = walk.ByFacing[i];
-        if (!slot.Clip.SpriteSheetId.IsValid()) {
+        const SpriteSheetClipReference& slot = walk.ByFacing[i];
+        if (!slot.SpriteSheetId.IsValid()) {
             continue;
         }
         emit << YAML::Key << kFacingKeys[i].Str() << YAML::Value << YAML::BeginMap;
-        emit << YAML::Key << "sprite_sheet" << YAML::Value << slot.Clip.SpriteSheetId.Value.Str();
-        emit << YAML::Key << "clip" << YAML::Value << slot.Clip.ClipName.Str();
+        emit << YAML::Key << "sprite_sheet" << YAML::Value << slot.SpriteSheetId.Value.Str();
+        emit << YAML::Key << "clip" << YAML::Value << slot.ClipName.Str();
         if (slot.FlipX) {
             emit << YAML::Key << "flip_x" << YAML::Value << true;
         }
@@ -152,10 +151,10 @@ WalkClips ParseWalkClips(const YAML::Node& node) {
         if (!slot_node) {
             continue;
         }
-        DirectionalClip& slot = walk.ByFacing[i];
-        slot.Clip.SpriteSheetId =
+        SpriteSheetClipReference& slot = walk.ByFacing[i];
+        slot.SpriteSheetId =
             AssetId::Normalize(StringView(slot_node["sprite_sheet"].as<std::string>("").c_str()));
-        slot.Clip.ClipName = StringView(slot_node["clip"].as<std::string>("").c_str());
+        slot.ClipName = StringView(slot_node["clip"].as<std::string>("").c_str());
         slot.FlipX = slot_node["flip_x"].as<bool>(false);
     }
     return walk;

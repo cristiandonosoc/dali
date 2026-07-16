@@ -2,8 +2,7 @@
 
 #include <dali/core/memory.h>
 #include <dali/game/assets/registry.h>
-#include <dali/game/file.h>
-#include <dali/game/log.h>
+#include <dali/game/platform.h>
 
 #include <yaml-cpp/yaml.h>
 

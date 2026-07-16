@@ -26,20 +26,14 @@ enum class EFacing : u8 {
 // exactly 45 degrees resolves to the horizontal facing.
 EFacing FacingFromDir(Vec2 dir);
 
-// One facing's walk animation: which clip, and whether to mirror it horizontally. FlipX is what
-// lets a single side-view clip serve both Left and Right — point both slots at it and flip one.
-struct DirectionalClip {
-    SpriteSheetClipReference Clip = {};
-    bool FlipX = false;
-};
-
-// An enemy's walk animation, one slot per facing. A slot may be left unset; drawing a facing whose
-// slot is unset asserts at the draw site (its clip reference resolves to null). No fallback by
-// design.
+// An enemy's walk animation, one clip reference per facing. A slot may be left unset; drawing a
+// facing whose slot is unset asserts at the draw site (its clip reference resolves to null). No
+// fallback by design. Each reference carries its own FlipX, so a single side-view clip can serve
+// both Left and Right by pointing both slots at it and flipping one.
 struct WalkClips {
-    Array<DirectionalClip, (i32)EFacing::COUNT> ByFacing = {};
+    Array<SpriteSheetClipReference, (i32)EFacing::COUNT> ByFacing = {};
 
-    const DirectionalClip& Resolve(EFacing facing) const { return ByFacing[(i32)facing]; }
+    const SpriteSheetClipReference& Resolve(EFacing facing) const { return ByFacing[(i32)facing]; }
 };
 
 // The design-time definition of one enemy type ("goblin", "wolf") — a lightweight CDO. Pure

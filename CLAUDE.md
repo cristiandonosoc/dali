@@ -195,14 +195,15 @@ Decisions made during the port (kept here so they're a recorded constraint, not 
   here: `<paste permalink after first generation>`.
 
 - **`PlatformState` is globally accessible from the game DLL via `GetGlobalPlatformState()` /
-  `SetGlobalPlatformState()` (`dali/game/platform_state.h`), rebound on every `OnSOLoaded` and
+  `SetGlobalPlatformState()` (`dali/game/platform.h`), rebound on every `OnSOLoaded` and
   cleared on `OnSOUnloaded`.** Rationale: almost everything hanging off `PlatformState` (memory
   arenas, file IO, logging) is infrastructure that's the same for the whole process — threading it
   explicitly through every leaf call bought nothing. This mirrors a pattern Kandinsky already used
   (`platform::GetPlatformContext()`/`SetPlatformContext()`). The line we're keeping: infrastructure
   on `PlatformState` is ambient; domain/gameplay state hanging off `PlatformState::GameState` (e.g.
   a future `World`) is still passed explicitly, so it stays independently testable/instantiable.
-  `LogError`/`LogWarning`/`Log` (`dali/game/log.h`) are the first thing built on top of this.
+  `LogError`/`LogWarning`/`Log` (`dali/game/platform.h`, alongside the file-IO and subprocess
+  wrappers) are the first thing built on top of this.
 
 ## Unspecified / deferred topics
 

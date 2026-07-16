@@ -94,9 +94,15 @@ struct SpriteSheetAsset {
 // rather than a resolved pointer. Resolve() looks the clip up live against the registry on every
 // call, so it can never dangle across clip edits or asset reloads. TODO(cdc): cache the resolved
 // pointer once the data is known frozen, if the per-lookup cost ever shows up.
+//
+// Also carries the per-reference presentation settings — how THIS use of the clip is drawn, as
+// opposed to the clip's own intrinsic data. FlipX (mirror horizontally) is the first; a single
+// side-view clip can serve both Left and Right by pointing both references at it and flipping one.
+// New per-use knobs (tint, playback speed multiplier, ...) belong here too.
 struct SpriteSheetClipReference {
     AssetId SpriteSheetId = {};
     FixedString<64> ClipName = {};
+    bool FlipX = false;
 
     // The referenced clip, looked up live. nullptr if unset, or the sheet/clip no longer exists.
     const SpriteSheetClip* Resolve(AssetRegistry& registry) const;

@@ -39,8 +39,8 @@ assets/enemies/goblin.yml           # blueprints are yml-only too
 ## File IO goes through the platform
 
 Asset code never touches `std::fstream`. All reads/writes go through the platform file API
-(`PlatformState::API.ReadFile` / `WriteFile`), wrapped game-side in `dali/game/file.h`
-(`ReadFile`/`WriteFile`) the same way `log.h` wraps logging. `WriteFile` **creates missing parent
+(`PlatformState::API.ReadFile` / `WriteFile`), wrapped game-side in `dali/game/platform.h`
+(`ReadFile`/`WriteFile`) the same way `platform.h` wraps logging. `WriteFile` **creates missing parent
 directories**; `ReadFile` returns an arena buffer that is null-terminated one byte past its end, so
 YAML text can be parsed straight from it. This keeps file IO on the platform (the port surface). The
 editor also reaches a few OS-only services this way — see *Platform services the editor uses*.
@@ -263,10 +263,10 @@ wrappers degrade gracefully (unknown time / “git unavailable”).**
   for sorting and “changed since load” without another call. The `DateTime` breakdown is an optional
   convenience the platform fills (only it has the timezone rules; via `SDL_TimeToDateTime`,
   DST-correct, carrying `UtcOffsetSeconds` so a value is self-describing). Defaults live on the
-  game-side wrapper (`file.h`), not the contract pointer — default args are illegal on a
+  game-side wrapper (`platform.h`), not the contract pointer — default args are illegal on a
   pointer-to-function.
 - **Subprocess** — `RunProcess(arena, std::span<const StringView> args) → ProcessResult{Launched,
-  ExitCode, Stdout}` (`dali/game/process.h`, over `SDL_Process`). **argv is a vector, never a shell
+  ExitCode, Stdout}` (`dali/game/platform.h`, over `SDL_Process`). **argv is a vector, never a shell
   string** (injection-safe). No working-directory parameter (the SDL API has none) — pass a tool flag
   such as `git -C <dir>`. It **blocks** and a spawn is far costlier than a file op, so callers must
   run it **on-demand / cached, never per-frame**. Editor-only in practice.

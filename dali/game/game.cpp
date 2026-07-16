@@ -5,8 +5,7 @@
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
 #include <dali/game/hex.h>
-#include <dali/game/log.h>
-#include <dali/game/process.h>
+#include <dali/game/platform.h>
 #include <dali/game/scene.h>
 
 #include <imgui.h>
@@ -97,14 +96,18 @@ constexpr Array<i32, TileChunk::kWidth * TileChunk::kWidth> kHexToSlot = MakeHex
 
 struct DrawContext {
     ImDrawList* DrawList;
+    // for live-resolving asset references at draw
+    AssetRegistry* Registry = nullptr;
+    // resolved once/frame; every tower draws its idle clip
+    const TowerAsset* DefaultTower = nullptr;
+
     Vec2 Origin;
     float Zoom = 1;
     float Time = 0;
-    AssetRegistry* Registry = nullptr;      // for live-resolving asset references at draw
-    const TowerAsset* DefaultTower = nullptr;  // resolved once/frame; every tower draws its idle clip
-
-    DrawContext(ImDrawList* draw_list, const Vec2& origin, float zoom, AssetRegistry* registry)
-        : DrawList(draw_list), Origin(origin), Zoom(zoom), Registry(registry) {}
+    // While Control is held, outline each enemy/tower sprite quad so its bounds are visible.
+    bool ShowBounds = false;
+    DrawContext(ImDrawList* draw_list, AssetRegistry* registry, const Vec2& origin, float zoom)
+        : DrawList(draw_list), Registry(registry), Origin(origin), Zoom(zoom) {}
 
     ImVec2 WorldToScreen(const Vec2& p) const {
         return ImVec2(Origin.x + p.x * Zoom, Origin.y + p.y * Zoom);
@@ -171,29 +174,60 @@ void DrawHealthBar(DrawContext* dc,
     dc->DrawList->AddRect(bar_min, bar_max, Color32::Black.Bits);
 }
 
+// A small magenta crosshair + dot at a sprite's pivot (its anchor point), so the pivot is
+// distinguishable from the green bounds box. Debug overlay, gated by DrawContext::ShowBounds.
+void DrawPivotMarker(DrawContext* dc, const ImVec2& pivot) {
+    constexpr float kArm = 5.0f;
+    dc->DrawList->AddLine(ImVec2(pivot.x - kArm, pivot.y),
+                          ImVec2(pivot.x + kArm, pivot.y),
+                          Color32::Magenta.Bits,
+                          1.5f);
+    dc->DrawList->AddLine(ImVec2(pivot.x, pivot.y - kArm),
+                          ImVec2(pivot.x, pivot.y + kArm),
+                          Color32::Magenta.Bits,
+                          1.5f);
+    dc->DrawList->AddCircleFilled(pivot, 1.5f, Color32::Magenta.Bits);
+}
+
+void DrawSpriteSheetClip(DrawContext* dc,
+                         const SpriteSheetClipReference& ref,
+                         const SpriteSheetClip& clip,
+                         const ImVec2& pos) {
+    i32 frame = clip.At(dc->Time, clip.FPS, true);
+    ImVec2 hsize = ToImVec2((clip._CellSize * dc->Zoom) / 2.0f);
+    FrameUv frameuv = clip.CellRect(frame);
+    ImVec2 uv0 = ToImVec2(frameuv.Uv0);
+    ImVec2 uv1 = ToImVec2(frameuv.Uv1);
+    if (ref.FlipX) {
+        // ImGui samples min.u -> max.u across the quad, so swapping the U bounds mirrors
+        // horizontally.
+        float u = uv0.x;
+        uv0.x = uv1.x;
+        uv1.x = u;
+    }
+
+    dc->DrawList->AddImage(clip._Resolved->Resource.ImGuiId(), pos - hsize, pos + hsize, uv0, uv1);
+
+    if (dc->ShowBounds) {
+        dc->DrawList->AddRect(pos - hsize, pos + hsize, Color32::Green.Bits, 0.0f, 0, 1.5f);
+        DrawPivotMarker(dc, pos);
+    }
+}
+
 void DrawEnemy(DrawContext* dc, const Enemy& enemy) {
     ImVec2 p = dc->WorldToScreen(enemy.Position);
     // dc->DrawList->AddCircleFilled(p, 6.0f * dc->Zoom, enemy.Data.Color.Bits);
     // dc->DrawList->AddCircle(p, 6.0f * dc->Zoom, Color32::Black.Bits, 0, 1.5f);
 
-    // The slot for this facing, resolved live. A drawn enemy is expected to carry a valid, baked walk
-    // clip for whichever way it faces; a missing one is a data error, not a runtime-recoverable state.
-    const DirectionalClip& slot = enemy.Data.Walk.Resolve(enemy.Facing);
-    const SpriteSheetClip* clip = slot.Clip.Resolve(*dc->Registry);
+    // The slot for this facing, resolved live. A drawn enemy is expected to carry a valid, baked
+    // walk clip for whichever way it faces; a missing one is a data error, not a
+    // runtime-recoverable state.
+    const SpriteSheetClipReference& ref = enemy.Data.Walk.Resolve(enemy.Facing);
+    const SpriteSheetClip* clip = ref.Resolve(*dc->Registry);
     ASSERT(clip);
     ASSERT(clip->_Resolved);
-    i32 frame = clip->At(dc->Time, clip->FPS, true);
-    ImVec2 hsize = ToImVec2((clip->_CellSize * dc->Zoom) / 2.0f);
-    FrameUv frameuv = clip->CellRect(frame);
-    ImVec2 uv0 = ToImVec2(frameuv.Uv0);
-    ImVec2 uv1 = ToImVec2(frameuv.Uv1);
-    if (slot.FlipX) {
-        // ImGui samples min.u -> max.u across the quad, so swapping the U bounds mirrors horizontally.
-        float u = uv0.x;
-        uv0.x = uv1.x;
-        uv1.x = u;
-    }
-    dc->DrawList->AddImage(clip->_Resolved->Resource.ImGuiId(), p - hsize, p + hsize, uv0, uv1);
+
+    DrawSpriteSheetClip(dc, ref, *clip, p);
 
     // Health bar, only once the enemy has taken damage (a full bar would just be clutter).
     if (enemy.Data.MaxHealth > 0.0f && enemy.Health < enemy.Data.MaxHealth) {
@@ -206,52 +240,78 @@ void DrawEnemy(DrawContext* dc, const Enemy& enemy) {
     }
 }
 
+void DrawTower(DrawContext* dc, const Tile& tile) {
+    ImVec2 center = dc->TileCenter(tile.Hex);
+    // The tower's idle animation, from its blueprint (resolved once per frame onto the context;
+    // every tower is one type for now, so they share it). Falls back to a placeholder disc when
+    // no blueprint/clip resolves, so an art-less tower is still visible.
+    const SpriteSheetClip* clip = nullptr;
+    if (dc->DefaultTower) {
+        clip = dc->DefaultTower->PerInstanceData.IdleClip.Resolve(*dc->Registry);
+    }
+
+    i32 pos = NONE;
+
+    bool drawable = clip != nullptr;
+    if (drawable) {
+        drawable &= clip->_Resolved != nullptr;
+    }
+    if (drawable) {
+        pos = clip->At(dc->Time, clip->FPS, true);
+        drawable &= pos != NONE;
+        drawable &= pos < clip->_Frames.Size;
+    }
+    if (drawable) {
+        FrameUv frameuv = clip->_Frames[pos];
+        ImVec2 uv0 = ToImVec2(frameuv.Uv0);
+        ImVec2 uv1 = ToImVec2(frameuv.Uv1);
+        if (dc->DefaultTower->PerInstanceData.IdleClip.FlipX) {
+            // Swapping the U bounds mirrors horizontally (ImGui samples min.u -> max.u).
+            float u = uv0.x;
+            uv0.x = uv1.x;
+            uv1.x = u;
+        }
+        ImVec2 hsize = ToImVec2((clip->_CellSize * dc->Zoom) / 2.0f);
+        dc->DrawList->AddImage((ImTextureID)clip->_Handle,
+                               center - hsize,
+                               center + hsize,
+                               uv0,
+                               uv1);
+        if (dc->ShowBounds) {
+            dc->DrawList->AddRect(center - hsize, center + hsize, Color32::Green.Bits, 0.0f, 0, 1.5f);
+            DrawPivotMarker(dc, center);
+        }
+    } else {
+        dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::SteelBlue.Bits);
+        dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
+        if (dc->ShowBounds) {
+            ImVec2 hsize(10.0f * dc->Zoom, 10.0f * dc->Zoom);
+            dc->DrawList->AddRect(center - hsize, center + hsize, Color32::Green.Bits, 0.0f, 0, 1.5f);
+            DrawPivotMarker(dc, center);
+        }
+    }
+
+    // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
+    // visible at a glance.
+    char cooldown_label[16];
+    snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tile.FireCooldown);
+    dc->DrawList->AddText(ImVec2(center.x + 12.0f * dc->Zoom, center.y - 8.0f * dc->Zoom),
+                          Color32::White.Bits,
+                          cooldown_label);
+}
+
 void DrawTileContent(DrawContext* dc, const Tile& tile, const Hex& hovered) {
     ImVec2 center = dc->TileCenter(tile.Hex);
     if (tile.Content == ETileContent::Spawner) {
         dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::Green.Bits);
         dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
     } else if (tile.Content == ETileContent::Tower) {
+        DrawTower(dc, tile);
+
         // The range ring only shows while hovering this tower, so a dense field stays readable.
         if (tile.Hex == hovered) {
             dc->DrawList->AddCircle(center, kTowerRange * dc->Zoom, Color32::Cyan.Bits, 0, 2.0f);
         }
-
-        // The tower's idle animation, from its blueprint (resolved once per frame onto the context;
-        // every tower is one type for now, so they share it). Falls back to a placeholder disc when
-        // no blueprint/clip resolves, so an art-less tower is still visible.
-        const SpriteSheetClip* clip = nullptr;
-        if (dc->DefaultTower) {
-            clip = dc->DefaultTower->PerInstanceData.IdleClip.Resolve(*dc->Registry);
-        }
-        i32 pos = NONE;
-        bool drawable = clip != nullptr;
-        if (drawable) {
-            drawable &= clip->_Resolved != nullptr;
-        }
-        if (drawable) {
-            pos = clip->At(dc->Time, clip->FPS, true);
-            drawable &= pos != NONE;
-            drawable &= pos < clip->_Frames.Size;
-        }
-        if (drawable) {
-            FrameUv frameuv = clip->_Frames[pos];
-            ImVec2 uv0 = ToImVec2(frameuv.Uv0);
-            ImVec2 uv1 = ToImVec2(frameuv.Uv1);
-            ImVec2 hsize = ToImVec2((clip->_CellSize * dc->Zoom) / 2.0f);
-            dc->DrawList->AddImage((ImTextureID)clip->_Handle, center - hsize, center + hsize, uv0, uv1);
-        } else {
-            dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::SteelBlue.Bits);
-            dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
-        }
-
-        // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
-        // visible at a glance.
-        char cooldown_label[16];
-        snprintf(cooldown_label, sizeof(cooldown_label), "%.2f", tile.FireCooldown);
-        dc->DrawList->AddText(ImVec2(center.x + 12.0f * dc->Zoom, center.y - 8.0f * dc->Zoom),
-                              Color32::White.Bits,
-                              cooldown_label);
     }
 }
 
@@ -275,9 +335,10 @@ std::optional<Hex> DrawHexGrid(PlatformState* ps,
                 io.DisplaySize.y * 0.5f + camera.y);
 
     ImDrawList* _draw_list = ImGui::GetBackgroundDrawList();
-    DrawContext dc(_draw_list, origin, zoom, registry);
+    DrawContext dc(_draw_list, registry, origin, zoom);
     dc.Time = ps->TimeTracking.TotalSeconds;
     dc.DefaultTower = registry->FindTowerAsset(world->DefaultTower);
+    dc.ShowBounds = io.KeyCtrl;
 
     // // World->screen: the sim is in zoom-independent world units; pixels are origin + world *
     // zoom. auto world_to_screen = [&](Vec2 w) -> ImVec2 {
@@ -651,7 +712,8 @@ void World::UpdateEnemies(float dt) {
             }
 
             Vec2 dir = Normalize(delta);
-            enemy.Facing = FacingFromDir(dir);  // only while actually moving; a stopped enemy holds it
+            enemy.Facing =
+                FacingFromDir(dir);  // only while actually moving; a stopped enemy holds it
             float move = Min(remaining, dist);
             enemy.Position.x += dir.x * move;
             enemy.Position.y += dir.y * move;

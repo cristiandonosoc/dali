@@ -5,15 +5,12 @@
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
 #include <dali/core/string.h>
-#include <dali/game/file.h>
-#include <dali/game/platform_state.h>
-#include <dali/game/process.h>
+#include <dali/game/platform.h>
+#include <dali/game/ui/widgets.h>
 
 #include <imgui.h>
 
-#include <cfloat>
 #include <cstdio>
-#include <cstring>
 
 namespace kdk {
 
@@ -26,110 +23,6 @@ StringView ForwardSlashes(Arena* arena, StringView s) {
     }
     buffer[s.Size] = '\0';
     return StringView(buffer, s.Size);
-}
-
-// ImGui::InputText against a FixedString: it edits the backing buffer (kept null-terminated) but has
-// no notion of FixedString::Size, so we resync it after an edit. Returns true when the text changed.
-template <u64 N>
-bool InputTextFixed(const char* label, FixedString<N>& str) {
-    bool changed = ImGui::InputText(label, str.StrMutable(), N);
-    if (changed) {
-        str.Size = (u32)std::strlen(str.StrMutable());
-    }
-    return changed;
-}
-
-// Collects pointers to the ids in |assets| whose short id contains |filter| (case-insensitive),
-// sorted alphabetically by short id. The pointers alias the registry (stable for the frame); the
-// index array is pushed into |arena|, so the caller MUST keep that arena's scope alive while it
-// iterates the result.
-template <typename T, i32 N>
-std::span<const AssetId*> SortedFilteredIds(Arena* arena,
-                                            FixedVector<T, N>& assets,
-                                            EAssetType type,
-                                            StringView filter) {
-    const AssetId** ids = arena->PushArray<const AssetId*>(assets.Size).data();
-    i32 count = 0;
-    for (T& asset : assets) {
-        StringView short_id = ShortId(type, asset.Manifest.Id);
-        if (!short_id.ContainsCi(filter)) {
-            continue;
-        }
-        ids[count] = &asset.Manifest.Id;
-        count++;
-    }
-    SortPred(ids, ids + count, [type](const AssetId* a, const AssetId* b) {
-        return std::strcmp(ShortId(type, *a).Str(), ShortId(type, *b).Str()) < 0;
-    });
-    return {ids, (u64)count};
-}
-
-// A search box sized to the list column, drawn just above a left list. The hint shows in the empty
-// box; |id| must be unique (a hidden "##..." label) so the four boxes don't collide.
-template <u64 N>
-void DrawFilterBox(const char* id, FixedString<N>& filter, float width) {
-    ImGui::SetNextItemWidth(width);
-    if (ImGui::InputTextWithHint(id, "filter (substring)...", filter.StrMutable(), N)) {
-        filter.Size = (u32)std::strlen(filter.StrMutable());
-    }
-}
-
-// SortedFilteredIds but dispatched by |type| onto the matching registry holder, so a generic (type-
-// erased) picker can list any asset type without knowing the concrete container.
-std::span<const AssetId*>
-    SortedFilteredIdsForType(Arena* arena, AssetRegistry* registry, EAssetType type, StringView filter) {
-    switch (type) {
-        case EAssetType::Texture:
-            return SortedFilteredIds(arena, registry->TextureAssets, type, filter);
-        case EAssetType::SpriteSheet:
-            return SortedFilteredIds(arena, registry->SpriteSheetAssets, type, filter);
-        case EAssetType::Enemy:
-            return SortedFilteredIds(arena, registry->EnemyAssets, type, filter);
-        case EAssetType::Tower:
-            return SortedFilteredIds(arena, registry->TowerAssets, type, filter);
-        case EAssetType::Invalid:
-        case EAssetType::COUNT: break;
-    }
-    return {};
-}
-
-// A filterable, alphabetically-sorted picker for one asset type. Renders as a combo whose open popup
-// carries a search box at the top — essential now that a type can hold dozens of assets. Writes the
-// chosen id into |*selected| and returns true if it changed this frame. |label| both titles the combo
-// and scopes its ImGui id (use "Name##uniq" when two pickers of the same type share a window).
-bool AssetSelector(const char* label, EAssetType type, AssetRegistry* registry, AssetId* selected) {
-    const char* preview = selected->IsValid() ? ShortId(type, *selected).Str() : "(none)";
-    if (!ImGui::BeginCombo(label, preview)) {
-        return false;
-    }
-
-    // One static filter buffer is safe: ImGui only ever has a single combo popup open at once. Reset
-    // it (and focus it) when the popup appears, so a query left over from a previous open doesn't
-    // silently hide everything the next time around.
-    static FixedString<64> filter = {};
-    if (ImGui::IsWindowAppearing()) {
-        filter.Set("");
-        ImGui::SetKeyboardFocusHere();
-    }
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    if (ImGui::InputTextWithHint("##asset_filter", "filter...", filter.StrMutable(), 64)) {
-        filter.Size = (u32)std::strlen(filter.StrMutable());
-    }
-
-    bool changed = false;
-    auto scratch = Arena::GetScratch();
-    for (const AssetId* id : SortedFilteredIdsForType(scratch, registry, type, filter.ToString())) {
-        bool is_selected = (*id == *selected);
-        if (ImGui::Selectable(ShortId(type, *id).Str(), is_selected)) {
-            *selected = *id;
-            changed = true;
-        }
-        if (is_selected) {
-            ImGui::SetItemDefaultFocus();
-        }
-    }
-    ImGui::EndCombo();
-    return changed;
 }
 
 // A forward-slashed, lowercased copy for case- and separator-insensitive path comparison: Windows
@@ -1129,8 +1022,8 @@ void DrawEnemyPreview(AssetEditor* editor, const EnemyAsset& enemy, AssetRegistr
         }
     }
 
-    const DirectionalClip& slot = enemy.PerInstanceData.Walk.Resolve(editor->PreviewFacing);
-    const SpriteSheetClip* clip = slot.Clip.Resolve(*registry);
+    const SpriteSheetClipReference& slot = enemy.PerInstanceData.Walk.Resolve(editor->PreviewFacing);
+    const SpriteSheetClip* clip = slot.Resolve(*registry);
     bool drawable = clip != nullptr;
     if (drawable) {
         drawable &= clip->_Resolved != nullptr;
@@ -1174,71 +1067,6 @@ void DrawEnemyPreview(AssetEditor* editor, const EnemyAsset& enemy, AssetRegistr
     ImGui::SliderFloat("Zoom##preview", &editor->PreviewZoom, 0.5f, 16.0f, "%.1fx");
 }
 
-// One facing's walk slot: pick a sheet, then a clip within it, then whether to mirror it. The
-// reference (sheet id + clip name) is stored directly on the slot and resolved live — no relink
-// step — so the status line just re-resolves to reflect the current selection. |label| both titles
-// the block and scopes the ImGui ids, so the four identical pickers don't collide.
-void DrawDirectionalClipPicker(const char* label,
-                               DirectionalClip* slot,
-                               AssetRegistry* registry,
-                               float time) {
-    ImGui::PushID(label);
-    ImGui::SeparatorText(label);
-    SpriteSheetClipReference& ref = slot->Clip;
-
-    if (AssetSelector("Sheet", EAssetType::SpriteSheet, registry, &ref.SpriteSheetId)) {
-        ref.ClipName = {};  // the previous clip belonged to the old sheet
-    }
-
-    SpriteSheetAsset* sheet = registry->FindSpriteSheetAsset(ref.SpriteSheetId);
-    const char* clip_preview = ref.ClipName.IsEmpty() ? "(choose clip)" : ref.ClipName.Str();
-    if (ImGui::BeginCombo("Clip", clip_preview)) {
-        if (sheet) {
-            for (SpriteSheetClip& clip : sheet->Clips) {
-                bool selected = clip.Name == ref.ClipName;
-                if (ImGui::Selectable(clip.Name.Str(), selected)) {
-                    ref.ClipName = clip.Name;
-                }
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    ImGui::Checkbox("Flip X", &slot->FlipX);
-
-    const SpriteSheetClip* resolved = ref.Resolve(*registry);
-    bool baked = resolved != nullptr;
-    if (baked) {
-        baked &= resolved->_Resolved != nullptr;
-    }
-    if (baked) {
-        // A small running thumbnail so this direction's clip (mirror included) plays right here,
-        // synced to the shared preview clock.
-        i32 pos = resolved->At(time, resolved->FPS, true);
-        bool has_frame = pos != NONE;
-        if (has_frame) {
-            has_frame &= pos < resolved->_Frames.Size;
-        }
-        if (has_frame) {
-            FrameUv uv = resolved->_Frames[pos];
-            ImVec2 uv0(uv.Uv0.x, uv.Uv0.y);
-            ImVec2 uv1(uv.Uv1.x, uv.Uv1.y);
-            if (slot->FlipX) {
-                float u = uv0.x;
-                uv0.x = uv1.x;
-                uv1.x = u;
-            }
-            constexpr float kThumb = 48.0f;
-            float aspect =
-                resolved->_CellSize.y > 0.0f ? resolved->_CellSize.x / resolved->_CellSize.y : 1.0f;
-            ImGui::Image((ImTextureID)resolved->_Handle, ImVec2(kThumb * aspect, kThumb), uv0, uv1);
-        }
-    } else if (ref.SpriteSheetId.IsValid()) {
-        ImGui::TextDisabled("unresolved");
-    }
-    ImGui::PopID();
-}
-
 void DrawEnemyInspector(AssetEditor* editor, EnemyAsset* enemy, AssetRegistry* registry) {
     ImGui::Text("Id: %s", enemy->Manifest.Id.Value.Str());
     ImGui::Separator();
@@ -1270,10 +1098,10 @@ void DrawEnemyInspector(AssetEditor* editor, EnemyAsset* enemy, AssetRegistry* r
     // both at the same clip and ticking Flip X on one.
     ImGui::SeparatorText("Walk");
     WalkClips& walk = enemy->PerInstanceData.Walk;
-    DrawDirectionalClipPicker("Down", &walk.ByFacing[(i32)EFacing::Down], registry, editor->PreviewTime);
-    DrawDirectionalClipPicker("Up", &walk.ByFacing[(i32)EFacing::Up], registry, editor->PreviewTime);
-    DrawDirectionalClipPicker("Left", &walk.ByFacing[(i32)EFacing::Left], registry, editor->PreviewTime);
-    DrawDirectionalClipPicker("Right", &walk.ByFacing[(i32)EFacing::Right], registry, editor->PreviewTime);
+    ClipReferencePicker("Down", &walk.ByFacing[(i32)EFacing::Down], registry, editor->PreviewTime);
+    ClipReferencePicker("Up", &walk.ByFacing[(i32)EFacing::Up], registry, editor->PreviewTime);
+    ClipReferencePicker("Left", &walk.ByFacing[(i32)EFacing::Left], registry, editor->PreviewTime);
+    ClipReferencePicker("Right", &walk.ByFacing[(i32)EFacing::Right], registry, editor->PreviewTime);
 
     DrawEnemyPreview(editor, *enemy, registry);
 
@@ -1281,59 +1109,6 @@ void DrawEnemyInspector(AssetEditor* editor, EnemyAsset* enemy, AssetRegistry* r
     if (ImGui::Button("Save")) {
         enemy->SaveManifest();
     }
-}
-
-// Picks the sprite sheet + clip for a lone clip reference (no mirror), with a small running thumbnail
-// synced to |time|. Like DrawDirectionalClipPicker but for a plain SpriteSheetClipReference — e.g. a
-// tower's idle animation, which has no facing or flip. |label| titles the block and scopes the ids.
-void DrawClipReferencePicker(const char* label,
-                             SpriteSheetClipReference* ref,
-                             AssetRegistry* registry,
-                             float time,
-                             float zoom) {
-    ImGui::PushID(label);
-    ImGui::SeparatorText(label);
-
-    if (AssetSelector("Sheet", EAssetType::SpriteSheet, registry, &ref->SpriteSheetId)) {
-        ref->ClipName = {};  // the previous clip belonged to the old sheet
-    }
-
-    SpriteSheetAsset* sheet = registry->FindSpriteSheetAsset(ref->SpriteSheetId);
-    const char* clip_preview = ref->ClipName.IsEmpty() ? "(choose clip)" : ref->ClipName.Str();
-    if (ImGui::BeginCombo("Clip", clip_preview)) {
-        if (sheet) {
-            for (SpriteSheetClip& clip : sheet->Clips) {
-                bool selected = clip.Name == ref->ClipName;
-                if (ImGui::Selectable(clip.Name.Str(), selected)) {
-                    ref->ClipName = clip.Name;
-                }
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    const SpriteSheetClip* resolved = ref->Resolve(*registry);
-    bool baked = resolved != nullptr;
-    if (baked) {
-        baked &= resolved->_Resolved != nullptr;
-    }
-    if (baked) {
-        i32 pos = resolved->At(time, resolved->FPS, true);
-        bool has_frame = pos != NONE;
-        if (has_frame) {
-            has_frame &= pos < resolved->_Frames.Size;
-        }
-        if (has_frame) {
-            FrameUv uv = resolved->_Frames[pos];
-            ImVec2 uv0(uv.Uv0.x, uv.Uv0.y);
-            ImVec2 uv1(uv.Uv1.x, uv.Uv1.y);
-            ImVec2 draw_size(resolved->_CellSize.x * zoom, resolved->_CellSize.y * zoom);
-            ImGui::Image((ImTextureID)resolved->_Handle, draw_size, uv0, uv1);
-        }
-    } else if (ref->SpriteSheetId.IsValid()) {
-        ImGui::TextDisabled("unresolved");
-    }
-    ImGui::PopID();
 }
 
 void DrawTowerInspector(AssetEditor* editor, TowerAsset* tower, AssetRegistry* registry) {
@@ -1350,8 +1125,9 @@ void DrawTowerInspector(AssetEditor* editor, TowerAsset* tower, AssetRegistry* r
     ImGui::DragFloat("Projectile Hit Radius", &data.ProjectileHitRadius, 0.5f, 0.0f, 100000.0f);
     ImGui::DragInt("Cost", &data.Cost, 1.0f, 0, 100000);
 
-    // Idle animation: a single clip played while the tower waits (no facing, no mirror).
-    DrawClipReferencePicker("Idle", &data.IdleClip, registry, editor->PreviewTime, editor->PreviewZoom);
+    // Idle animation: a single clip played while the tower waits. Zoomable so pixel art can be
+    // inspected; Flip X honored by the in-game draw.
+    ClipReferencePicker("Idle", &data.IdleClip, registry, editor->PreviewTime, {.Zoom = editor->PreviewZoom});
     ImGui::SliderFloat("Zoom##idle", &editor->PreviewZoom, 0.5f, 16.0f, "%.1fx");
 
     ImGui::Separator();

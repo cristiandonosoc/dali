@@ -2,7 +2,7 @@
 
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
-#include <dali/game/log.h>
+#include <dali/game/platform.h>
 
 namespace kdk {
 
