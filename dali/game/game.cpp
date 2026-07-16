@@ -7,6 +7,7 @@
 #include <dali/game/hex.h>
 #include <dali/game/platform.h>
 #include <dali/game/scene.h>
+#include <dali/game/ui/widgets.h>
 
 #include <imgui.h>
 
@@ -841,9 +842,9 @@ void GameInit(PlatformState* ps, GameState* gs) {
     // The blueprint waves spawn until wave-composition exists. If the asset is absent, UpdateWave
     // falls back to a default-stat enemy, so this id being unresolved is not fatal.
     gs->World.DefaultEnemy = AssetId::Normalize("enemies/wolf"sv);
-    // The blueprint the build cursor places, until a build menu exists. Unresolved is not fatal —
-    // the tower falls back to default stats and a placeholder disc.
-    gs->World.DefaultTower = AssetId::Normalize("towers/arrow"sv);
+    // The build menu's initial selection; the player switches it in the side panel. Unresolved is
+    // not fatal — the tower falls back to default stats and a placeholder disc.
+    gs->World.SelectedTower = AssetId::Normalize("towers/arrow"sv);
 
     // Reload the last saved scene; fall back to an empty grid the first time (no file yet). The
     // player lays out the path/goal in the PreGame editor.
@@ -952,16 +953,137 @@ StringView ToString(EGamePhase phase) {
 
 namespace game_private {
 
-// The blueprint the build cursor places (World::DefaultTower). Resolving happens here rather than in
-// the sim, which stays registry-agnostic; a missing asset resolves to default stats so the game
-// still runs before any tower asset is authored. By value: TowerAsset is a small value blob and
-// placement happens at click rate, which buys a caller-side fallback local at every site.
-TowerAsset ResolveDefaultTower(const World& world, AssetRegistry* registry) {
-    const TowerAsset* blueprint = registry->FindTowerAsset(world.DefaultTower);
+// The blueprint the build cursor places (World::SelectedTower, chosen in the build menu). Resolving
+// happens here rather than in the sim, which stays registry-agnostic; a missing asset resolves to
+// default stats so the game still runs before any tower asset is authored. By value: TowerAsset is a
+// small value blob and placement happens at click rate, which buys a caller-side fallback local at
+// every site.
+TowerAsset ResolveSelectedTower(const World& world, AssetRegistry* registry) {
+    const TowerAsset* blueprint = registry->FindTowerAsset(world.SelectedTower);
     if (!blueprint) {
         return {};
     }
     return *blueprint;
+}
+
+// One drawable animation frame: everything AddImage needs to paint a clip's current frame anywhere
+// (thumbnails, palettes), with FlipX already applied to the UVs.
+struct ClipFrameDraw {
+    ImTextureID Handle = 0;
+    ImVec2 Uv0 = {};
+    ImVec2 Uv1 = {};
+    Vec2 CellSize = {};
+};
+
+// Resolves |ref| live and samples its clip at |time| (looping). nullopt when the clip is missing or
+// not baked, so callers fall back to a placeholder.
+std::optional<ClipFrameDraw> ResolveClipFrame(const SpriteSheetClipReference& ref,
+                                              AssetRegistry* registry,
+                                              float time) {
+    const SpriteSheetClip* clip = ref.Resolve(*registry);
+    bool drawable = clip != nullptr;
+    if (drawable) {
+        drawable &= clip->_Resolved != nullptr;
+    }
+    i32 pos = NONE;
+    if (drawable) {
+        pos = clip->At(time, clip->FPS, true);
+        drawable &= pos != NONE;
+        drawable &= pos < clip->_Frames.Size;
+    }
+    if (!drawable) {
+        return std::nullopt;
+    }
+
+    FrameUv uv = clip->_Frames[pos];
+    ClipFrameDraw frame = {};
+    frame.Handle = (ImTextureID)clip->_Handle;
+    frame.Uv0 = ImVec2(uv.Uv0.x, uv.Uv0.y);
+    frame.Uv1 = ImVec2(uv.Uv1.x, uv.Uv1.y);
+    if (ref.FlipX) {
+        float u = frame.Uv0.x;
+        frame.Uv0.x = frame.Uv1.x;
+        frame.Uv1.x = u;
+    }
+    frame.CellSize = clip->_CellSize;
+    return frame;
+}
+
+// The tower build menu: one row per loaded TowerAsset (animated idle-clip thumbnail, name, cost);
+// clicking a row makes it the blueprint the build cursor places (World::SelectedTower). Each row is
+// a full-width Selectable for hover/selection feedback, with the content painted over it through the
+// window draw list. The cost turns red while unaffordable in Build (where placing charges gold);
+// PreGame placement is free, so it stays neutral there.
+void DrawTowerBuildMenu(GameState* gs, float time) {
+    constexpr float kThumb = 40.0f;
+    constexpr float kPad = 4.0f;
+
+    ImGui::SeparatorText("Towers");
+
+    auto scratch = Arena::GetScratch();
+    std::span<const AssetId*> ids =
+        SortedFilteredIds(scratch, gs->Registry.TowerAssets, EAssetType::Tower, {});
+    if (ids.empty()) {
+        ImGui::TextWrapped("No tower assets loaded. Author one under Assets > Tower.");
+        return;
+    }
+
+    for (const AssetId* id : ids) {
+        const TowerAsset* tower = gs->Registry.FindTowerAsset(*id);
+        if (!tower) {
+            continue;
+        }
+        ImGui::PushID(id->Value.Str());
+
+        ImVec2 row_min = ImGui::GetCursorScreenPos();
+        bool selected = (*id == gs->World.SelectedTower);
+        float row_height = kThumb + kPad * 2.0f;
+        if (ImGui::Selectable("##tower_row", selected, 0, ImVec2(0.0f, row_height))) {
+            gs->World.SelectedTower = *id;
+        }
+
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+
+        // Thumbnail: the idle clip's current frame, aspect-fit into a kThumb box. Falls back to the
+        // same placeholder disc the world draws for a clip-less tower, so the two always match.
+        ImVec2 box_min(row_min.x + kPad, row_min.y + kPad);
+        std::optional<ClipFrameDraw> frame =
+            ResolveClipFrame(tower->PerInstanceData.IdleClip, &gs->Registry, time);
+        if (frame.has_value()) {
+            bool sizable = frame->CellSize.x > 0.0f;
+            sizable &= frame->CellSize.y > 0.0f;
+            float scale = 1.0f;
+            if (sizable) {
+                scale = Min(kThumb / frame->CellSize.x, kThumb / frame->CellSize.y);
+            }
+            Vec2 size = frame->CellSize * scale;
+            ImVec2 img_min(box_min.x + (kThumb - size.x) * 0.5f,
+                           box_min.y + (kThumb - size.y) * 0.5f);
+            ImVec2 img_max(img_min.x + size.x, img_min.y + size.y);
+            draw->AddImage(frame->Handle, img_min, img_max, frame->Uv0, frame->Uv1);
+        } else {
+            ImVec2 center(box_min.x + kThumb * 0.5f, box_min.y + kThumb * 0.5f);
+            draw->AddCircleFilled(center, kThumb * 0.35f, Color32::SteelBlue.Bits);
+            draw->AddCircle(center, kThumb * 0.35f, Color32::White.Bits, 0, 2.0f);
+        }
+
+        // Name + cost, right of the thumbnail.
+        float text_x = box_min.x + kThumb + 8.0f;
+        draw->AddText(ImVec2(text_x, row_min.y + kPad),
+                      ImGui::GetColorU32(ImGuiCol_Text),
+                      ShortId(EAssetType::Tower, *id).Str());
+        char cost_label[32];
+        snprintf(cost_label, sizeof(cost_label), "%d gold", tower->PerInstanceData.Cost);
+        bool unaffordable = (gs->Phase == EGamePhase::Build);
+        unaffordable &= (gs->World.Gold < tower->PerInstanceData.Cost);
+        ImU32 cost_color = unaffordable ? IM_COL32(230, 90, 90, 255)
+                                        : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        draw->AddText(ImVec2(text_x, row_min.y + kPad + ImGui::GetTextLineHeightWithSpacing()),
+                      cost_color,
+                      cost_label);
+
+        ImGui::PopID();
+    }
 }
 
 // Adds a new chunk adjacent to the existing grid, in the direction of |clicked|. Chunk centers sit
@@ -1059,7 +1181,7 @@ void ApplyEditorOp(GameState* gs, Hex hex) {
                 ClearTileContent(tile);
             } else if (!tile->IsPath) {
                 // Towers guard the path from beside it, so they only go on non-path tiles.
-                MakeTower(tile, ResolveDefaultTower(gs->World, &gs->Registry));
+                MakeTower(tile, ResolveSelectedTower(gs->World, &gs->Registry));
             }
             break;
         }
@@ -1082,7 +1204,7 @@ void TryBuyTower(World* world, AssetRegistry* registry, Hex hex) {
     if (tile->Content != ETileContent::None) {
         return;
     }
-    TowerAsset blueprint = ResolveDefaultTower(*world, registry);
+    TowerAsset blueprint = ResolveSelectedTower(*world, registry);
     if (world->Gold < blueprint.PerInstanceData.Cost) {
         return;
     }
@@ -1287,6 +1409,13 @@ void GameRender(PlatformState* ps, GameState* gs) {
                 ImGui::EndCombo();
             }
 
+            // Placing towers in the editor uses the same build-menu selection as the Build phase
+            // (free here — PreGame lays out the map, it doesn't charge gold).
+            if (gs->CurrentOperation == EOperationMode::ToggleTower) {
+                DrawTowerBuildMenu(gs, ps->TimeTracking.TotalSeconds);
+                ImGui::Separator();
+            }
+
             if (ImGui::Button("Save Scene")) {
                 SaveScene(world, kScenePath);
             }
@@ -1310,8 +1439,6 @@ void GameRender(PlatformState* ps, GameState* gs) {
             break;
         }
         case EGamePhase::Build: {
-            ImGui::Text("Click an empty tile to build a tower (%d gold).",
-                        ResolveDefaultTower(world, &gs->Registry).PerInstanceData.Cost);
             if (ImGui::Button("Start Wave")) {
                 world.ArmNextWave();
                 gs->Phase = EGamePhase::Wave;
@@ -1320,6 +1447,9 @@ void GameRender(PlatformState* ps, GameState* gs) {
             if (ImGui::Button("Restart Game")) {
                 gs->Phase = EGamePhase::PreGame;
             }
+
+            DrawTowerBuildMenu(gs, ps->TimeTracking.TotalSeconds);
+            ImGui::TextWrapped("Click an empty tile to build the selected tower.");
             break;
         }
         case EGamePhase::Wave: {

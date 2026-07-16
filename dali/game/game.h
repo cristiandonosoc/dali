@@ -163,11 +163,11 @@ struct World {
     // exists. Set in GameInit; resolved against the registry by the caller, which passes the
     // blueprint into UpdateWave (the sim stays registry-agnostic).
     AssetId DefaultEnemy = {};
-    // The blueprint the build cursor places, until a build menu (tower picking) exists. Placed
+    // The blueprint the build cursor places, chosen in the side panel's tower build menu. Placed
     // towers snapshot it and thereafter run off their own Tower::Data, so this is only read at
-    // placement. Set in GameInit; resolved against the registry by the caller, which passes the
+    // placement. Seeded in GameInit; resolved against the registry by the caller, which passes the
     // blueprint into MakeTower (the sim stays registry-agnostic).
-    AssetId DefaultTower = {};
+    AssetId SelectedTower = {};
     FixedVector<Projectile, kMaxProjectiles> Projectiles = {};
 
     Wave Wave = {};

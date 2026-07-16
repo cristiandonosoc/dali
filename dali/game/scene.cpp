@@ -61,9 +61,10 @@ bool LoadScene(World* world, AssetRegistry* registry, StringView path) {
     if (root["goal"] && root["goal"].size() == 2) {
         world->Goal = Hex{root["goal"][0].as<int>(0), root["goal"][1].as<int>(0)};
     }
-    // The scene stores no per-tile blueprint, so every tower in it is World::DefaultTower. Resolve
-    // once up front; a missing asset falls back to default stats, matching the placement path.
-    const TowerAsset* found = registry->FindTowerAsset(world->DefaultTower);
+    // The scene stores no per-tile blueprint, so every tower in it stamps from World::SelectedTower
+    // (the build-menu selection at load time). Resolve once up front; a missing asset falls back to
+    // default stats, matching the placement path.
+    const TowerAsset* found = registry->FindTowerAsset(world->SelectedTower);
     TowerAsset tower_blueprint = found ? *found : TowerAsset{};
 
     if (root["tiles"]) {
