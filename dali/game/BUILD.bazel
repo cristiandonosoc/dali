@@ -18,6 +18,7 @@ cc_library(
         "hex.cpp",
         "platform.cpp",
         "scene.cpp",
+        "serde.cpp",
         "ui/widgets.cpp",
     ],
     hdrs = [
@@ -34,6 +35,7 @@ cc_library(
         "hex.h",
         "platform.h",
         "scene.h",
+        "serde.h",
         "ui/widgets.h",
     ],
     visibility = ["//dali:__subpackages__"],
@@ -50,6 +52,20 @@ cc_test(
     name = "hex_test",
     srcs = [
         "hex_test.cpp",
+    ],
+    testonly = True,
+    size = "small",
+    defines = ["KDK_IN_TEST=1"],
+    deps = [
+        ":lib",
+        "//third_party:catch2",
+    ],
+)
+
+cc_test(
+    name = "serde_test",
+    srcs = [
+        "serde_test.cpp",
     ],
     testonly = True,
     size = "small",
