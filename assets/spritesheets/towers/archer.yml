@@ -5,56 +5,70 @@ clips:
   - name: idle_1
     texture: textures/towers/archer_tower/idle_1
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0.5}
     frames: [0]
   - name: idle_2
     texture: textures/towers/archer_tower/idle_2
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]
   - name: idle_3
     texture: textures/towers/archer_tower/idle_3
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]
   - name: idle_4
     texture: textures/towers/archer_tower/idle_4
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3, 4, 5]
   - name: idle_5
     texture: textures/towers/archer_tower/idle_5
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3, 4, 5]
   - name: idle_6
     texture: textures/towers/archer_tower/idle_6
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3, 4, 5]
   - name: idle_7
     texture: textures/towers/archer_tower/idle_7
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3, 4, 5]
   - name: upgrade_1
     texture: textures/towers/archer_tower/upgrade_1
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]
   - name: upgrade_2
     texture: textures/towers/archer_tower/upgrade_2
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]
   - name: upgrade_4
     texture: textures/towers/archer_tower/upgrade_4
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]
   - name: upgrade_3
     texture: textures/towers/archer_tower/upgrade_3
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]
   - name: upgrade_5
     texture: textures/towers/archer_tower/upgrade_5
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]
   - name: upgrade_7
     texture: textures/towers/archer_tower/upgrade_7
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]
   - name: upgrade_6
     texture: textures/towers/archer_tower/upgrade_6
     grid: {cell_w: 70, cell_h: 130, margin: 0, spacing: 0}
+    pivot: {x: 0, y: 0}
     frames: [0, 1, 2, 3]

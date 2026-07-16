@@ -130,4 +130,17 @@ bool ClipReferencePicker(const char* label,
     return changed;
 }
 
+bool DrawClipEditFields(ClipEditFields* fields) {
+    bool changed = false;
+    changed |= ImGui::InputInt("Cell W", &fields->Grid.CellW);
+    changed |= ImGui::InputInt("Cell H", &fields->Grid.CellH);
+    changed |= ImGui::InputInt("Margin", &fields->Grid.Margin);
+    changed |= ImGui::InputInt("Spacing", &fields->Grid.Spacing);
+    changed |= ImGui::DragFloat("FPS", &fields->FPS, 0.25f, 0.0f, 240.0f, "%.2f");
+    changed |= ImGui::DragFloat2("Pivot", &fields->Pivot.x, 0.01f, -1.0f, 1.0f, "%.2f");
+    ImGui::SameLine();
+    ImGui::TextDisabled("(0,0)=center, +y=down");
+    return changed;
+}
+
 }  // namespace kdk

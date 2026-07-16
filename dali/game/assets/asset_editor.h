@@ -72,21 +72,28 @@ struct AssetEditor {
     AssetId NewClipTexture = {};
 
     // Spritesheet "Batch Create" mode: turn several textures into clips in one shot. Each selected
-    // texture becomes a clip named <prefix><texture-basename>, all sharing one grid. Names that
-    // collide with an existing clip are skipped — the batch never overwrites hand-authored frames.
+    // texture becomes a clip named <prefix><texture-basename>, all sharing one ClipEditFields (grid +
+    // fps + pivot). Names that collide with an existing clip are skipped — the batch never overwrites
+    // hand-authored frames.
     static constexpr i32 kMaxBatchClips = SpriteSheetAsset::kMaxClips;
-    SpriteGrid ClipBatchGrid = {32, 32, 0, 0};  // W, H, Margin, Spacing applied to every created clip
-    FixedString<64> ClipBatchPrefix = {};       // prepended to each clip name (empty by default)
-    bool ClipBatchFillFrames = true;            // fill every cell as a frame after creating each clip
-    FixedString<64> ClipBatchFilter = {};       // texture multi-select filter
+    ClipEditFields ClipBatchFields = {};   // grid/fps/pivot applied to every created clip
+    FixedString<64> ClipBatchPrefix = {};  // prepended to each clip name (empty by default)
+    bool ClipBatchFillFrames = true;       // fill every cell as a frame after creating each clip
+    FixedString<64> ClipBatchFilter = {};  // texture multi-select filter
     FixedVector<AssetId, kMaxBatchClips> ClipBatchSelection = {};  // chosen texture ids
-    i32 ClipBatchResultOk = NONE;               // last create tally (NONE == none run)
+    i32 ClipBatchResultOk = NONE;                                  // last create tally (NONE == none run)
     i32 ClipBatchResultSkip = 0;
 
-    // Clip playback preview (editor-local; deliberately not stored on the clip).
+    // Spritesheet "Batch Edit" mode: multi-select existing clips of the sheet and overwrite their
+    // grid/fps/pivot with one shared ClipEditFields. Selection is by clip name (clips have no id).
+    ClipEditFields ClipEditTemplate = {};
+    FixedString<64> ClipEditFilter = {};                              // clip multi-select filter
+    FixedVector<FixedString<64>, kMaxBatchClips> ClipEditSelection = {};  // chosen clip names
+    i32 ClipEditResultOk = NONE;                                      // last apply tally (NONE == none run)
+
+    // Clip playback preview (editor-local clock/toggles; playback rate is the clip's own FPS).
     FixedString<64> SelectedClip = {};
     float ClipTime = 0.0f;
-    float ClipFps = 12.0f;
     bool ClipLoop = true;
     bool ClipPlaying = true;
 

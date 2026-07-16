@@ -194,7 +194,13 @@ void DrawSpriteSheetClip(DrawContext* dc,
                          const SpriteSheetClip& clip,
                          const ImVec2& pos) {
     i32 frame = clip.At(dc->Time, clip.FPS, true);
-    ImVec2 hsize = ToImVec2((clip._CellSize * dc->Zoom) / 2.0f);
+    // The clip's pivot lands on |pos|: take the centered quad and shift it by the pivot offset.
+    Vec2 draw_size = clip._CellSize * dc->Zoom;
+    ImVec2 hsize = ToImVec2(draw_size / 2.0f);
+    ImVec2 off = ToImVec2(clip.PivotOffset(draw_size));
+    ImVec2 pmin(pos.x - hsize.x + off.x, pos.y - hsize.y + off.y);
+    ImVec2 pmax(pos.x + hsize.x + off.x, pos.y + hsize.y + off.y);
+
     FrameUv frameuv = clip.CellRect(frame);
     ImVec2 uv0 = ToImVec2(frameuv.Uv0);
     ImVec2 uv1 = ToImVec2(frameuv.Uv1);
@@ -206,10 +212,10 @@ void DrawSpriteSheetClip(DrawContext* dc,
         uv1.x = u;
     }
 
-    dc->DrawList->AddImage(clip._Resolved->Resource.ImGuiId(), pos - hsize, pos + hsize, uv0, uv1);
+    dc->DrawList->AddImage(clip._Resolved->Resource.ImGuiId(), pmin, pmax, uv0, uv1);
 
     if (dc->ShowBounds) {
-        dc->DrawList->AddRect(pos - hsize, pos + hsize, Color32::Green.Bits, 0.0f, 0, 1.5f);
+        dc->DrawList->AddRect(pmin, pmax, Color32::Green.Bits, 0.0f, 0, 1.5f);
         DrawPivotMarker(dc, pos);
     }
 }
@@ -271,14 +277,15 @@ void DrawTower(DrawContext* dc, const Tile& tile) {
             uv0.x = uv1.x;
             uv1.x = u;
         }
-        ImVec2 hsize = ToImVec2((clip->_CellSize * dc->Zoom) / 2.0f);
-        dc->DrawList->AddImage((ImTextureID)clip->_Handle,
-                               center - hsize,
-                               center + hsize,
-                               uv0,
-                               uv1);
+        // The clip's pivot lands on the tile center: shift the centered quad by the pivot offset.
+        Vec2 draw_size = clip->_CellSize * dc->Zoom;
+        ImVec2 hsize = ToImVec2(draw_size / 2.0f);
+        ImVec2 off = ToImVec2(clip->PivotOffset(draw_size));
+        ImVec2 pmin(center.x - hsize.x + off.x, center.y - hsize.y + off.y);
+        ImVec2 pmax(center.x + hsize.x + off.x, center.y + hsize.y + off.y);
+        dc->DrawList->AddImage((ImTextureID)clip->_Handle, pmin, pmax, uv0, uv1);
         if (dc->ShowBounds) {
-            dc->DrawList->AddRect(center - hsize, center + hsize, Color32::Green.Bits, 0.0f, 0, 1.5f);
+            dc->DrawList->AddRect(pmin, pmax, Color32::Green.Bits, 0.0f, 0, 1.5f);
             DrawPivotMarker(dc, center);
         }
     } else {

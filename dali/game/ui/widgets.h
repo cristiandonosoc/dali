@@ -95,4 +95,9 @@ bool ClipReferencePicker(const char* label,
                          float time,
                          const ClipPickerOptions& options = {});
 
+// Editors for every field in ClipEditFields: Cell W/H, Margin, Spacing, FPS, Pivot. This is the ONE
+// place the clip-shape widget list lives, shared by the single-clip editor and both batch tabs so
+// they can never drift. Returns true if any field changed this frame.
+bool DrawClipEditFields(ClipEditFields* fields);
+
 }  // namespace kdk

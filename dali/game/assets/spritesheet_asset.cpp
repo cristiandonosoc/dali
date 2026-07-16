@@ -114,6 +114,20 @@ i32 SpriteSheetClip::At(float time, float fps, bool loop) const {
     return step;
 }
 
+Vec2 SpriteSheetClip::PivotOffset(Vec2 draw_size) const {
+    // Pivot in [-1,1] measures from the center in half-cells; shifting the quad by -half*pivot moves
+    // that point onto the anchor. Component-wise (glm::vec2 * is Hadamard).
+    return draw_size * Pivot * -0.5f;
+}
+
+ClipEditFields SpriteSheetClip::EditFields() const { return {Grid, FPS, Pivot}; }
+
+void SpriteSheetClip::ApplyEditFields(const ClipEditFields& fields) {
+    Grid = fields.Grid;
+    FPS = fields.FPS;
+    Pivot = fields.Pivot;
+}
+
 bool SpriteSheetAsset::Create(AssetId id) {
     if (!id.IsValid()) {
         LogError("SpriteSheetAsset::Create: non-canonical id '%s'", id.Value.Str());
@@ -179,6 +193,12 @@ std::optional<SpriteSheetAsset> SpriteSheetAsset::LoadFromDisk(AssetId id) {
                 clip.Grid.Margin = grid["margin"].as<int>(0);
                 clip.Grid.Spacing = grid["spacing"].as<int>(0);
             }
+            // Optional; absent means centered (default). Old sheets predate it and load fine.
+            if (YAML::Node pivot = clip_node["pivot"]) {
+                clip.Pivot.x = pivot["x"].as<float>(0.0f);
+                clip.Pivot.y = pivot["y"].as<float>(0.0f);
+            }
+            clip.FPS = clip_node["fps"].as<float>(8.0f);  // optional; old sheets default to 8
             if (YAML::Node frames = clip_node["frames"]) {
                 for (const auto& frame_node : frames) {
                     if (clip.Frames.IsFull()) {
@@ -217,6 +237,11 @@ bool SpriteSheetAsset::SaveManifest() const {
         emit << YAML::Key << "margin" << YAML::Value << clip.Grid.Margin;
         emit << YAML::Key << "spacing" << YAML::Value << clip.Grid.Spacing;
         emit << YAML::EndMap;
+        emit << YAML::Key << "pivot" << YAML::Value << YAML::Flow << YAML::BeginMap;
+        emit << YAML::Key << "x" << YAML::Value << clip.Pivot.x;
+        emit << YAML::Key << "y" << YAML::Value << clip.Pivot.y;
+        emit << YAML::EndMap;
+        emit << YAML::Key << "fps" << YAML::Value << clip.FPS;
         emit << YAML::Key << "frames" << YAML::Value << YAML::Flow << YAML::BeginSeq;
         for (i32 frame : clip.Frames) {
             emit << frame;

@@ -27,6 +27,17 @@ struct FrameUv {
     Vec2 Uv1 = {};
 };
 
+// The authored, batch-editable parameters of a clip: how it's sliced (Grid), how fast it plays
+// (FPS), and where its anchor sits (Pivot). Bundled so the three clip-editing surfaces (the single-
+// clip editor and the two batch tabs) all edit the SAME set through one widget, and can't drift. A
+// clip stores these as flat members; this mirror is the value carrier those editors share (see
+// SpriteSheetClip::EditFields / ApplyEditFields and DrawClipEditFields).
+struct ClipEditFields {
+    SpriteGrid Grid = {32, 32, 0, 0};
+    float FPS = 8.0f;
+    Vec2 Pivot = {};
+};
+
 // A named animation over a single texture, sliced by its own grid. The frame list is stored as cell
 // indices (the source of truth, reimport-safe); at resolve time it's baked into _Frames (ready-to-
 // sample UV rects) and the texture is linked, so drawing a frame is a direct index with no
@@ -38,6 +49,13 @@ struct SpriteSheetClip {
     SpriteGrid Grid = {};
     FixedVector<i32, 64> Frames = {};  // cell indices, in playback order (serialized)
 	float FPS = 8;
+
+    // The sprite's anchor within a cell, in normalized cell coordinates on [-1, 1] per axis:
+    // (0, 0) is the cell CENTER, (-1, -1) the top-left corner, (+1, +1) the bottom-right. When the
+    // clip is drawn at a world position, THIS point lands on it — e.g. (0, +1) puts the bottom-center
+    // (a character's feet) on the tile. Normalized (not pixels) so it survives a cell-size change.
+    // Serialized; default center.
+    Vec2 Pivot = {};
 
     // Resolved / baked by Resolve(); not serialized. All frames of a clip sample the same texture,
     // so the GL handle and cell size are clip-level, not per-frame.
@@ -61,6 +79,16 @@ struct SpriteSheetClip {
     // |loop|. Returns NONE if empty. loop == false clamps on the last position. Index _Frames
     // (baked UV) or Frames (cell index) with the result.
     i32 At(float time, float fps, bool loop) const;
+
+    // The pixel offset that shifts a centered draw quad so Pivot lands on the anchor point. Add it to
+    // both corners of the centered quad [anchor - size/2, anchor + size/2]. |draw_size| is the on-
+    // screen cell size (_CellSize * zoom). Zero when Pivot is centered.
+    Vec2 PivotOffset(Vec2 draw_size) const;
+
+    // The single bridge between a clip's flat fields and the shared ClipEditFields carrier, so the
+    // editors read/write exactly these members and nowhere else lists them.
+    ClipEditFields EditFields() const;
+    void ApplyEditFields(const ClipEditFields& fields);
 };
 
 // A spritesheet: one concept ("goblin"), assembled from the clips over its textures. Pure metadata

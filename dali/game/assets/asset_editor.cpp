@@ -327,7 +327,7 @@ void DrawInspector(AssetEditor* editor, TextureAsset* tex) {
 // Grid-overlay frame picker for one clip: draws the clip's texture with cell boundaries on top
 // (cells already in the clip highlighted), and appends the clicked cell to the sequence. Returns
 // whether a cell was added this frame (the caller re-resolves so the baked frames stay current).
-bool DrawClipFramePicker(AssetEditor* editor, SpriteSheetClip& clip) {
+bool DrawClipFramePicker(AssetEditor* editor, SpriteSheetClip& clip, float width) {
     if (!clip._Resolved) {
         ImGui::TextWrapped("Texture '%s' is not resolved.",
                            ShortId(EAssetType::Texture, clip.Texture).Str());
@@ -337,10 +337,10 @@ bool DrawClipFramePicker(AssetEditor* editor, SpriteSheetClip& clip) {
     i32 cell_count = clip.CellCount();
 
     bool changed = false;
-    // Fixed, modest height so the picker doesn't eat the whole inspector (and hide the playback
-    // preview below it); it scrolls if the image is larger.
+    // Fixed |width| (the left column) and a modest height so the picker doesn't eat the inspector;
+    // it scrolls if the image is larger. The playback preview sits to its right.
     ImGui::BeginChild("frame_picker",
-                      ImVec2(0.0f, 300.0f),
+                      ImVec2(width, 300.0f),
                       ImGuiChildFlags_Borders,
                       ImGuiWindowFlags_HorizontalScrollbar);
     if (res.IsValid()) {
@@ -387,7 +387,8 @@ bool DrawClipFramePicker(AssetEditor* editor, SpriteSheetClip& clip) {
 // Playback preview for one clip: editor-local fps/loop advance the clip and draw its current baked
 // frame. Playback params live here, not on the clip.
 void DrawClipPlayback(AssetEditor* editor, SpriteSheetClip& clip) {
-    ImGui::SliderFloat("FPS", &editor->ClipFps, 1.0f, 30.0f, "%.0f");
+    // Playback rate is the clip's own (serialized) FPS, edited via DrawClipEditFields. Only the
+    // loop/play toggles and the clock are editor-local here.
     ImGui::Checkbox("Loop", &editor->ClipLoop);
     ImGui::SameLine();
     if (ImGui::Button(editor->ClipPlaying ? "Pause" : "Play")) {
@@ -397,12 +398,14 @@ void DrawClipPlayback(AssetEditor* editor, SpriteSheetClip& clip) {
     if (ImGui::Button("Restart")) {
         editor->ClipTime = 0.0f;
     }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%.1f fps", clip.FPS);
 
     if (editor->ClipPlaying) {
         editor->ClipTime += ImGui::GetIO().DeltaTime;
     }
 
-    i32 pos = clip.At(editor->ClipTime, editor->ClipFps, editor->ClipLoop);
+    i32 pos = clip.At(editor->ClipTime, clip.FPS, editor->ClipLoop);
     if (pos == NONE) {
         ImGui::TextDisabled("(empty clip)");
         return;
@@ -414,10 +417,23 @@ void DrawClipPlayback(AssetEditor* editor, SpriteSheetClip& clip) {
     FrameUv uv = clip._Frames[pos];
     ImGui::Text("Frame %d (cell %d)", pos, clip.Frames[pos]);
     float zoom = editor->PreviewZoom;
+    ImVec2 size(clip._CellSize.x * zoom, clip._CellSize.y * zoom);
+    ImVec2 img_min = ImGui::GetCursorScreenPos();
     ImGui::Image((ImTextureID)clip._Handle,
-                 ImVec2(clip._CellSize.x * zoom, clip._CellSize.y * zoom),
+                 size,
                  ImVec2(uv.Uv0.x, uv.Uv0.y),
                  ImVec2(uv.Uv1.x, uv.Uv1.y));
+
+    // Pivot crosshair, so dragging Pivot is visible against the frame. Pivot [-1,1] maps to [0,1]
+    // across the drawn image.
+    ImVec2 pivot(img_min.x + (clip.Pivot.x + 1.0f) * 0.5f * size.x,
+                 img_min.y + (clip.Pivot.y + 1.0f) * 0.5f * size.y);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    constexpr float kArm = 6.0f;
+    u32 color = Color32::Magenta.Bits;
+    draw_list->AddLine(ImVec2(pivot.x - kArm, pivot.y), ImVec2(pivot.x + kArm, pivot.y), color, 1.5f);
+    draw_list->AddLine(ImVec2(pivot.x, pivot.y - kArm), ImVec2(pivot.x, pivot.y + kArm), color, 1.5f);
+    draw_list->AddCircleFilled(pivot, 2.0f, color);
 }
 
 // The expanded editor for the selected clip: retarget its texture, edit its grid, build its frame
@@ -437,10 +453,13 @@ void DrawClipEditor(AssetEditor* editor, AssetRegistry* registry, SpriteSheetCli
         ImGui::TextDisabled("(unresolved)");
     }
 
-    dirty |= ImGui::InputInt("Cell W", &clip.Grid.CellW);
-    dirty |= ImGui::InputInt("Cell H", &clip.Grid.CellH);
-    dirty |= ImGui::InputInt("Margin", &clip.Grid.Margin);
-    dirty |= ImGui::InputInt("Spacing", &clip.Grid.Spacing);
+    // Grid + fps + pivot through the shared bundle, so this editor and the two batch tabs stay in
+    // lockstep. Copy out, edit, copy back on change (the bridge keeps the field list in one place).
+    ClipEditFields fields = clip.EditFields();
+    if (DrawClipEditFields(&fields)) {
+        clip.ApplyEditFields(fields);
+        dirty = true;
+    }
 
     if (ImGui::Button("Fill all frames")) {
         clip.Frames.Clear();
@@ -461,15 +480,23 @@ void DrawClipEditor(AssetEditor* editor, AssetRegistry* registry, SpriteSheetCli
 
     ImGui::SliderFloat("Zoom", &editor->PreviewZoom, 0.5f, 16.0f, "%.1fx");
     ImGui::TextDisabled("Click a cell to append it to the sequence.");
-    if (DrawClipFramePicker(editor, clip)) {
+
+    // Cell editor (left) and animation preview (right), side by side. The playback samples the baked
+    // frames, so re-resolve between the two if a click changed the sequence.
+    float picker_w = ImGui::GetContentRegionAvail().x * 0.6f;
+    if (DrawClipFramePicker(editor, clip, picker_w)) {
         dirty = true;
     }
-
     if (dirty) {
         clip.Resolve(*registry);
     }
-
+    ImGui::SameLine();
+    ImGui::BeginChild("clip_preview",
+                      ImVec2(0.0f, 300.0f),
+                      ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_HorizontalScrollbar);
     DrawClipPlayback(editor, clip);
+    ImGui::EndChild();
 }
 
 // The single-clip authoring tab: add one clip at a time, then pick one to edit its grid/frames.
@@ -576,9 +603,9 @@ bool BatchGridIsValid(const SpriteGrid& grid) {
     return ok;
 }
 
-// Creates a clip per selected texture, all sharing editor->ClipBatchGrid. Skips names that repeat
-// within the batch or already exist in the sheet (never overwrites). Optionally fills every cell as a
-// frame. Tallies onto editor->ClipBatchResult*.
+// Creates a clip per selected texture, all sharing editor->ClipBatchFields (grid + fps + pivot).
+// Skips names that repeat within the batch or already exist in the sheet (never overwrites).
+// Optionally fills every cell as a frame. Tallies onto editor->ClipBatchResult*.
 void BatchCreateClips(AssetEditor* editor, AssetRegistry* registry, SpriteSheetAsset* sheet) {
     auto scratch = Arena::GetScratch();
     FixedVector<FixedString<64>, AssetEditor::kMaxBatchClips> seen = {};
@@ -603,7 +630,7 @@ void BatchCreateClips(AssetEditor* editor, AssetRegistry* registry, SpriteSheetA
         SpriteSheetClip clip = {};
         clip.Name = name;
         clip.Texture = texture;
-        clip.Grid = editor->ClipBatchGrid;
+        clip.ApplyEditFields(editor->ClipBatchFields);  // grid + fps + pivot, shared with the editor
         clip.Resolve(*registry);  // link the texture so the grid can slice it
         if (editor->ClipBatchFillFrames) {
             i32 count = clip.CellCount();
@@ -631,13 +658,9 @@ void BatchCreateClips(AssetEditor* editor, AssetRegistry* registry, SpriteSheetA
 // The batch-create tab: pick a shared grid + prefix, multi-select textures, and turn each into a clip
 // named after its basename in one shot. Mirrors the texture tab's Batch Import.
 void DrawSpriteSheetBatchTab(AssetEditor* editor, AssetRegistry* registry, SpriteSheetAsset* sheet) {
-    // Grid + fill applied to every clip this batch creates.
-    ImGui::SeparatorText("Grid (applied to all)");
-    SpriteGrid& grid = editor->ClipBatchGrid;
-    ImGui::InputInt("Cell W", &grid.CellW);
-    ImGui::InputInt("Cell H", &grid.CellH);
-    ImGui::InputInt("Margin", &grid.Margin);
-    ImGui::InputInt("Spacing", &grid.Spacing);
+    // Grid + fps + pivot applied to every clip this batch creates (same bundle as the clip editor).
+    ImGui::SeparatorText("Values (applied to all)");
+    DrawClipEditFields(&editor->ClipBatchFields);
     ImGui::Checkbox("Fill all frames", &editor->ClipBatchFillFrames);
 
     ImGui::SeparatorText("Naming");
@@ -722,7 +745,7 @@ void DrawSpriteSheetBatchTab(AssetEditor* editor, AssetRegistry* registry, Sprit
     }
     ImGui::EndChild();
 
-    bool grid_ok = BatchGridIsValid(grid);
+    bool grid_ok = BatchGridIsValid(editor->ClipBatchFields.Grid);
     if (!grid_ok) {
         ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.2f, 1.0f),
                            "Set Cell W and Cell H (> 0) to create clips.");
@@ -750,6 +773,105 @@ void DrawSpriteSheetBatchTab(AssetEditor* editor, AssetRegistry* registry, Sprit
     }
 }
 
+// Overwrites every selected clip's grid + fps + pivot with editor->ClipEditTemplate, re-resolving
+// each so its baked frames follow the new grid. Apply-everything (all three fields), by design.
+// Names with no matching clip (e.g. a clip removed since selection) are silently skipped.
+void ApplyBatchEdit(AssetEditor* editor, AssetRegistry* registry, SpriteSheetAsset* sheet) {
+    i32 ok = 0;
+    for (const FixedString<64>& name : editor->ClipEditSelection) {
+        for (SpriteSheetClip& clip : sheet->Clips) {
+            if (!(clip.Name == name)) {
+                continue;
+            }
+            clip.ApplyEditFields(editor->ClipEditTemplate);
+            clip.Resolve(*registry);
+            ok++;
+            break;
+        }
+    }
+    editor->ClipEditResultOk = ok;
+}
+
+// The batch-edit tab: multi-select existing clips of this sheet and overwrite their grid/fps/pivot
+// with one shared ClipEditFields. Same value bundle as the Clip and Batch Create tabs.
+void DrawSpriteSheetEditTab(AssetEditor* editor, AssetRegistry* registry, SpriteSheetAsset* sheet) {
+    // Values that overwrite every selected clip; seed them from a real clip to tweak, not guess.
+    ImGui::SeparatorText("Values (overwrite all selected)");
+    DrawClipEditFields(&editor->ClipEditTemplate);
+    ImGui::BeginDisabled(editor->ClipEditSelection.IsEmpty());
+    if (ImGui::Button("Load from first selected")) {
+        if (const SpriteSheetClip* first = sheet->FindClip(editor->ClipEditSelection[0].ToString())) {
+            editor->ClipEditTemplate = first->EditFields();
+        }
+    }
+    ImGui::EndDisabled();
+
+    // Clip multi-select: click a row to toggle it in/out of the selection.
+    ImGui::SeparatorText("Clips");
+    DrawFilterBox("##clipedit_filter", editor->ClipEditFilter, 240.0f);
+    ImGui::SameLine();
+    bool select_all = ImGui::SmallButton("Select all");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear")) {
+        editor->ClipEditSelection.Clear();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%d selected)", editor->ClipEditSelection.Size);
+
+    StringView filter = editor->ClipEditFilter.ToString();
+    if (select_all) {
+        for (const SpriteSheetClip& clip : sheet->Clips) {
+            if (editor->ClipEditSelection.IsFull()) {
+                break;
+            }
+            if (!clip.Name.ToString().ContainsCi(filter)) {
+                continue;
+            }
+            if (!ClipNameSeen(editor->ClipEditSelection, clip.Name.ToString())) {
+                editor->ClipEditSelection.Push(clip.Name);
+            }
+        }
+    }
+
+    ImGui::BeginChild("clipedit_list", ImVec2(0.0f, 200.0f), ImGuiChildFlags_Borders);
+    for (const SpriteSheetClip& clip : sheet->Clips) {
+        if (!clip.Name.ToString().ContainsCi(filter)) {
+            continue;
+        }
+        bool selected = ClipNameSeen(editor->ClipEditSelection, clip.Name.ToString());
+        if (ImGui::Selectable(clip.Name.Str(), selected)) {
+            i32 idx = NONE;
+            for (i32 i = 0; i < editor->ClipEditSelection.Size; i++) {
+                if (editor->ClipEditSelection[i] == clip.Name) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx != NONE) {
+                editor->ClipEditSelection.RemoveUnorderedAt(idx);
+            } else if (!editor->ClipEditSelection.IsFull()) {
+                editor->ClipEditSelection.Push(clip.Name);
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    if (editor->ClipEditSelection.IsEmpty()) {
+        ImGui::TextDisabled("Select one or more clips to edit.");
+        return;
+    }
+
+    char label[64];
+    snprintf(label, sizeof(label), "Apply to %d clips", editor->ClipEditSelection.Size);
+    if (ImGui::Button(label)) {
+        ApplyBatchEdit(editor, registry, sheet);
+    }
+    if (editor->ClipEditResultOk != NONE) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("applied to %d", editor->ClipEditResultOk);
+    }
+}
+
 void DrawSpriteSheetInspector(AssetEditor* editor,
                               AssetRegistry* registry,
                               SpriteSheetAsset* sheet) {
@@ -759,7 +881,8 @@ void DrawSpriteSheetInspector(AssetEditor* editor,
         sheet->SaveManifest();
     }
 
-    // Two ways to author clips: one at a time (Clip), or a whole folder of textures at once (Batch).
+    // Three ways to author clips: one at a time (Clip), a folder of textures into new clips (Batch
+    // Create), or mass-edit existing clips (Batch Edit).
     if (ImGui::BeginTabBar("sheet_clip_modes")) {
         if (ImGui::BeginTabItem("Clip")) {
             DrawSpriteSheetClipTab(editor, registry, sheet);
@@ -767,6 +890,10 @@ void DrawSpriteSheetInspector(AssetEditor* editor,
         }
         if (ImGui::BeginTabItem("Batch Create")) {
             DrawSpriteSheetBatchTab(editor, registry, sheet);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Batch Edit")) {
+            DrawSpriteSheetEditTab(editor, registry, sheet);
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
