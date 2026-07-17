@@ -6,7 +6,7 @@
 #include <dali/core/memory.h>
 #include <dali/core/string.h>
 #include <dali/game/platform.h>
-#include <dali/game/ui/widgets.h>
+#include <dali/game/imgui_widgets.h>
 
 #include <imgui.h>
 

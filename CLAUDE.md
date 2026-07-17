@@ -205,6 +205,42 @@ Decisions made during the port (kept here so they're a recorded constraint, not 
   `LogError`/`LogWarning`/`Log` (`dali/game/platform.h`, alongside the file-IO and subprocess
   wrappers) are the first thing built on top of this.
 
+- **Game UI is its own tier, arbitrated by emission order: ImGui -> UI -> game.** `dali/game/ui/`
+  holds game UI (`UILayer`, `UIButton`); `dali/game/imgui_widgets.h` holds dev tooling built on
+  ImGui's widget system (asset editor, debug panel). The split is what each depends on: the UI layer
+  reads Dali's own `InputState` and uses `ImDrawList` purely as a triangle sink — the same temporary
+  draw path the world already renders through — so a real render layer swaps both at once. Tooling
+  may use ImGui freely. Priority needs no ids, retained rects, or deferred capture: the game is the
+  lowest tier, so it simply runs last. A hovered element sets `UILayer::MouseCaptured` (seeded from
+  `InputState::MouseOverride`, which is ImGui's claim), and the game reads the accumulated answer.
+  Consequence: emission order is UI-then-world, the reverse of the z-order, so `GameRender` paints
+  them into two channels of one draw list and merges. Known limit: first-submitted wins an overlap
+  while last-submitted paints on top — fine for a flat row, wrong once popups/tooltips exist, which
+  is when a retained rect list walked back-to-front is owed.
+
+- **The debug panel is an overlay, not a viewport edge.** It is toggled with `/` and deliberately
+  does not bias the world's draw origin. The bias it used to apply (`kSidePanelWidth * 0.5`) was
+  only ever a constant camera pan — it clipped nothing — and keeping it would make the world lurch
+  sideways on every toggle. There is no viewport rect; the world centers on the window and the panel
+  floats above it. Pan if it covers something.
+
+## Known debt (direction agreed, not yet done)
+
+Recorded so they don't become tribal memory. Each is deferred deliberately, not forgotten:
+
+- **Rendering runs gameplay.** `GameRender` calls `ApplyEditorOp`/`TryBuyTower`, so a click mutates
+  the world at draw time rather than in `GameUpdate`, and rendering is not a pure read of the world.
+  Intended shape: input queues a command that `GameUpdate` drains next tick. Deferred because the
+  command shape wants designing on its own and is orthogonal to the input tiering. See the
+  `TODO(arch)` in `GameRender`.
+
+- **`DrawContext` is `game.cpp`-private, so the UI layer can't share it.** It is now built once in
+  `GameRender` and passed down, so the world's draw paths agree on one draw list/origin/zoom — but
+  the struct still lives in `game_private`, not a header. A world-space `UIButton` (one that tracks
+  a tower rather than a screen rect) needs `DrawContext::WorldToScreen`, so the struct has to move
+  to a header before `UILayer` can hold it instead of its own `_DrawList`. Not worth doing until a
+  world-space button actually exists.
+
 ## Unspecified / deferred topics
 
 The following are intentionally left open and will be decided as the port progresses:

@@ -1,4 +1,4 @@
-#include <dali/game/ui/widgets.h>
+#include <dali/game/imgui_widgets.h>
 
 #include <cfloat>
 #include <cstring>

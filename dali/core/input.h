@@ -63,6 +63,8 @@ enum class EKey : u16 {
     Tab = 43,
     Space = 44,
 
+    Slash = 56,
+
     F1 = 58,
     F2 = 59,
     F3 = 60,

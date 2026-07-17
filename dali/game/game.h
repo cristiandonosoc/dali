@@ -278,6 +278,11 @@ struct GameState {
     // scale by this.
     float Zoom = 1.0f;
 
+    // The debug panel is dev tooling overlaid on the game, not part of it — "/" toggles it. It
+    // floats above the world rather than carving space out of it, so the view never shifts when it
+    // comes and goes.
+    bool ShowDebugPanel = true;
+
     World World = {};
     int InternalDetectedReload = 0;
 

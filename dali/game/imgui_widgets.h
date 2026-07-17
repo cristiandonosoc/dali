@@ -10,10 +10,15 @@
 #include <cstring>
 #include <span>
 
-// A small collection of reusable, registry-aware ImGui widgets shared by the editor (and any future
-// in-game tooling). Nothing here owns state — each widget edits a caller-provided value and, where
-// useful, returns whether it changed this frame. Keep pure ImGui here; anything asset-domain lives
-// behind the registry the widgets are handed.
+// Reusable, registry-aware ImGui widgets for tooling — the asset editor and any debug panel. These
+// are dev-facing controls built out of stock ImGui, NOT game UI: an in-game HUD wants its own look
+// and its own input rules, so it belongs somewhere else rather than growing out of this file.
+// Nothing here owns state — each widget edits a caller-provided value and, where useful, returns
+// whether it changed this frame.
+//
+// This depends on the asset registry, which would be backwards if assets ever became a module of
+// their own (tooling should depend on assets, not the reverse). Everything under dali/game is flat
+// today, so it costs nothing; revisit when that split actually happens.
 namespace kdk {
 
 // ImGui::InputText against a FixedString: it edits the backing buffer (kept null-terminated) but has

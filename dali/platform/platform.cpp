@@ -362,6 +362,7 @@ namespace platform_private {
 static_assert(kKeyCount == SDL_SCANCODE_COUNT);
 static_assert((u32)EKey::W == SDL_SCANCODE_W);
 static_assert((u32)EKey::Space == SDL_SCANCODE_SPACE);
+static_assert((u32)EKey::Slash == SDL_SCANCODE_SLASH);
 static_assert((u32)EKey::Escape == SDL_SCANCODE_ESCAPE);
 static_assert((u32)EKey::LCtrl == SDL_SCANCODE_LCTRL);
 static_assert((u32)EKey::Up == SDL_SCANCODE_UP);
