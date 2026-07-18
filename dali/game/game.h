@@ -259,7 +259,7 @@ constexpr EAppMode kAppModes[] = {
 // Build and Wave alternate (place towers, then fight a wave); GameOver ends the run.
 enum class EGamePhase : u8 {
     PreGame,
-    Build,
+    Prepare,
     Wave,
     GameOver,
 };

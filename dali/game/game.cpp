@@ -5,9 +5,9 @@
 #include <dali/core/filesystem.h>
 #include <dali/core/memory.h>
 #include <dali/game/hex.h>
+#include <dali/game/imgui_widgets.h>
 #include <dali/game/platform.h>
 #include <dali/game/scene.h>
-#include <dali/game/imgui_widgets.h>
 #include <dali/game/ui/ui.h>
 
 #include <imgui.h>
@@ -16,11 +16,6 @@
 #include <optional>
 
 namespace kdk {
-
-// Hex center-to-corner distance in WORLD units. The sim runs entirely in world units (enemy
-// movement, ranges, spawn placement); the renderer converts to pixels as world * zoom. At zoom 1 a
-// world unit is one pixel.
-constexpr float kHexSize = 60.0f;
 
 // Tower tuning (range, fire interval, damage, projectile hit radius, cost) is authored per
 // blueprint on TowerAsset::InstanceData and snapshotted onto each Tower at placement — there are no
@@ -93,31 +88,24 @@ consteval Array<i32, TileChunk::kWidth * TileChunk::kWidth> MakeHexToSlot() {
 constexpr Array<Hex, TileChunk::kTileCount> kSlotToHex = MakeSlotToHex();
 constexpr Array<i32, TileChunk::kWidth * TileChunk::kWidth> kHexToSlot = MakeHexToSlot();
 
-// The frame's shared draw state: one draw list, one origin/zoom, for everything that paints the
-// world. Built once in GameRender and passed down, so no draw path re-derives the transform and
-// picking can invert exactly what rendering used.
-struct DrawContext {
-    ImDrawList* DrawList;
-    // for live-resolving asset references at draw
-    AssetRegistry* Registry = nullptr;
+DrawContext NewDrawContext(PlatformState* ps, GameState* gs) {
+    ImGuiIO& io = ImGui::GetIO();
+    Vec2 origin = {io.DisplaySize.x * 0.5f + gs->Camera.x, io.DisplaySize.y * 0.5f + gs->Camera.y};
 
-    Vec2 Origin;
-    float Zoom = 1;
-    float Time = 0;
-    // While Control is held, outline each enemy/tower sprite quad so its bounds are visible.
-    bool ShowBounds = false;
-    DrawContext(ImDrawList* draw_list, AssetRegistry* registry, const Vec2& origin, float zoom)
-        : DrawList(draw_list), Registry(registry), Origin(origin), Zoom(zoom) {}
+    ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
 
-    ImVec2 WorldToScreen(const Vec2& p) const {
-        return ImVec2(Origin.x + p.x * Zoom, Origin.y + p.y * Zoom);
-    }
+    DrawContext dc = {
+        .Registry = &gs->Registry,
+        .DrawList = draw_list,
+        .UI = UILayer::New(ps),
+        .Origin = origin,
+        .Zoom = gs->Zoom,
+        .Time = (float)ps->TimeTracking.TotalSeconds,
+        .ShowBounds = io.KeyCtrl,
+    };
 
-    // A tile-center in screen space. Shared by the grid pass and the path spine so they line up.
-    ImVec2 TileCenter(const Hex& hex) const {
-        return WorldToScreen(Hex::HexToWorld(kHexSize, hex));
-    }
-};
+    return dc;
+}
 
 // Draws a short arrow from |from_center| toward |toward_center| (a neighbouring tile center),
 // scaled to |size|. Used to visualize each path tile's PathDirection.
@@ -290,7 +278,8 @@ void DrawTower(DrawContext* dc, const Tile& tile, const Tower& tower) {
         dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
         if (dc->ShowBounds) {
             ImVec2 hsize(10.0f * dc->Zoom, 10.0f * dc->Zoom);
-            dc->DrawList->AddRect(center - hsize, center + hsize, Color32::Green.Bits, 0.0f, 0, 1.5f);
+            dc->DrawList
+                ->AddRect(center - hsize, center + hsize, Color32::Green.Bits, 0.0f, 0, 1.5f);
             DrawPivotMarker(dc, center);
         }
     }
@@ -316,7 +305,11 @@ void DrawTileContent(DrawContext* dc, const Tile& tile, const std::optional<Hex>
 
         // The range ring only shows while hovering this tower, so a dense field stays readable.
         if (tile.Hex == hovered) {
-            dc->DrawList->AddCircle(center, tower.Data.Range * dc->Zoom, Color32::Cyan.Bits, 0, 2.0f);
+            dc->DrawList->AddCircle(center,
+                                    tower.Data.Range * dc->Zoom,
+                                    Color32::Cyan.Bits,
+                                    0,
+                                    2.0f);
         }
     }
 }
@@ -329,18 +322,18 @@ void DrawTileContent(DrawContext* dc, const Tile& tile, const std::optional<Hex>
 // Returns the hovered hex, empty when the mouse belongs to a higher tier (|ui| is consulted, not
 // ImGui directly — it already folds ImGui's claim in). Acting on that hex is the caller's call:
 // the game is the lowest tier, so it can only decide once every tier above it has been emitted.
-std::optional<Hex> DrawHexGrid(DrawContext* dc, UILayer* ui, World* world) {
+std::optional<Hex> DrawHexGrid(DrawContext* dc, World* world) {
     float zoom = dc->Zoom;
 
     // Which hex is under the mouse? Invert the exact transform the context paints with (undo zoom,
     // then origin), so the highlight lines up regardless of the screen's Y-down convention and
-    // picking stays in lockstep with rendering. Stays empty when a higher tier owns the mouse, so no
-    // hex lights up under the debug panel or behind a UI button. Empty space with no tile still
+    // picking stays in lockstep with rendering. Stays empty when a higher tier owns the mouse, so
+    // no hex lights up under the debug panel or behind a UI button. Empty space with no tile still
     // hovers, so ops like AddChunk can target a void.
     std::optional<Hex> hovered = {};
-    if (!ui->MouseCaptured) {
-        Vec2 mouse_world((ui->MousePos.x - dc->Origin.x) / zoom,
-                         (ui->MousePos.y - dc->Origin.y) / zoom);
+    if (!dc->UI.MouseCaptured) {
+        Vec2 mouse_world((dc->UI.MousePos.x - dc->Origin.x) / zoom,
+                         (dc->UI.MousePos.y - dc->Origin.y) / zoom);
         hovered = Hex::WorldToHex(kHexSize, mouse_world);
     }
 
@@ -900,7 +893,7 @@ void GameUpdate(PlatformState* ps, GameState* gs) {
     if (world.Wave.ToSpawn == 0 && world.Enemies.Size == 0) {
         world.Projectiles.Clear();
         world.ResetTowerCooldowns();
-        gs->Phase = EGamePhase::Build;  // wave cleared; back to building
+        gs->Phase = EGamePhase::Prepare;  // wave cleared; back to building
     }
 }
 
@@ -933,7 +926,7 @@ StringView ToString(EGamePhase phase) {
     // clang-format off
     switch (phase) {
         case EGamePhase::PreGame:  return "PreGame"sv;
-        case EGamePhase::Build:    return "Build"sv;
+        case EGamePhase::Prepare:    return "Prepare"sv;
         case EGamePhase::Wave:     return "Wave"sv;
         case EGamePhase::GameOver: return "GameOver"sv;
     }
@@ -946,9 +939,9 @@ namespace game_private {
 
 // The blueprint the build cursor places (World::SelectedTower, chosen in the build menu). Resolving
 // happens here rather than in the sim, which stays registry-agnostic; a missing asset resolves to
-// default stats so the game still runs before any tower asset is authored. By value: TowerAsset is a
-// small value blob and placement happens at click rate, which buys a caller-side fallback local at
-// every site.
+// default stats so the game still runs before any tower asset is authored. By value: TowerAsset is
+// a small value blob and placement happens at click rate, which buys a caller-side fallback local
+// at every site.
 TowerAsset ResolveSelectedTower(const World& world, AssetRegistry* registry) {
     const TowerAsset* blueprint = registry->FindTowerAsset(world.SelectedTower);
     if (!blueprint) {
@@ -1002,9 +995,9 @@ std::optional<ClipFrameDraw> ResolveClipFrame(const SpriteSheetClipReference& re
 
 // The tower build menu: one row per loaded TowerAsset (animated idle-clip thumbnail, name, cost);
 // clicking a row makes it the blueprint the build cursor places (World::SelectedTower). Each row is
-// a full-width Selectable for hover/selection feedback, with the content painted over it through the
-// window draw list. The cost turns red while unaffordable in Build (where placing charges gold);
-// PreGame placement is free, so it stays neutral there.
+// a full-width Selectable for hover/selection feedback, with the content painted over it through
+// the window draw list. The cost turns red while unaffordable in Build (where placing charges
+// gold); PreGame placement is free, so it stays neutral there.
 void DrawTowerBuildMenu(GameState* gs, float time) {
     constexpr float kThumb = 40.0f;
     constexpr float kPad = 4.0f;
@@ -1065,10 +1058,10 @@ void DrawTowerBuildMenu(GameState* gs, float time) {
                       ShortId(EAssetType::Tower, *id).Str());
         char cost_label[32];
         snprintf(cost_label, sizeof(cost_label), "%d gold", tower->PerInstanceData.Cost);
-        bool unaffordable = (gs->Phase == EGamePhase::Build);
+        bool unaffordable = (gs->Phase == EGamePhase::Prepare);
         unaffordable &= (gs->World.Gold < tower->PerInstanceData.Cost);
-        ImU32 cost_color = unaffordable ? IM_COL32(230, 90, 90, 255)
-                                        : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        ImU32 cost_color =
+            unaffordable ? IM_COL32(230, 90, 90, 255) : ImGui::GetColorU32(ImGuiCol_TextDisabled);
         draw->AddText(ImVec2(text_x, row_min.y + kPad + ImGui::GetTextLineHeightWithSpacing()),
                       cost_color,
                       cost_label);
@@ -1342,7 +1335,7 @@ void DrawAssetsMode(GameState* gs, float menu_bar_height) {
 // Placeholder game UI: a centered row of squares along the bottom edge. Here to exercise the input
 // tiering — hovering one suppresses the grid highlight underneath and swallows the click — before
 // the real tower palette (icons, cost, selection) lands on top of it.
-void DrawGameUI(UILayer* ui) {
+void DrawGameUI(DrawContext* dc) {
     constexpr i32 kButtonCount = 4;
     constexpr float kButtonSize = 64.0f;
     constexpr float kSpacing = 12.0f;
@@ -1354,7 +1347,7 @@ void DrawGameUI(UILayer* ui) {
     float y = io.DisplaySize.y - kBottomMargin - kButtonSize;
 
     for (i32 i = 0; i < kButtonCount; ++i) {
-        if (UIButton(ui, Vec2(x, y), Vec2(kButtonSize, kButtonSize))) {
+        if (UIButton(dc, Vec2(x, y), Vec2(kButtonSize, kButtonSize))) {
             printf("[game] UI button %d clicked\n", i);
         }
         x += kButtonSize + kSpacing;
@@ -1419,12 +1412,12 @@ void DrawDebugPanel(PlatformState* ps, GameState* gs, float menu_bar_height) {
                 can_start &= !world.SpawnSources.IsEmpty();
                 if (can_start) {
                     world.BeginRun();
-                    gs->Phase = EGamePhase::Build;
+                    gs->Phase = EGamePhase::Prepare;
                 }
             }
             break;
         }
-        case EGamePhase::Build: {
+        case EGamePhase::Prepare: {
             if (ImGui::Button("Start Wave")) {
                 world.ArmNextWave();
                 gs->Phase = EGamePhase::Wave;
@@ -1495,32 +1488,26 @@ void GameRender(PlatformState* ps, GameState* gs) {
     // Center the world in the window, then apply the camera pan. The debug panel is an overlay and
     // deliberately does NOT bias this: it can be toggled away ("/"), and biasing would make the
     // world lurch sideways each time. Pan if it covers something.
-    ImGuiIO& io = ImGui::GetIO();
-    Vec2 origin(io.DisplaySize.x * 0.5f + gs->Camera.x, io.DisplaySize.y * 0.5f + gs->Camera.y);
 
-    ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
-    DrawContext dc(draw_list, &gs->Registry, origin, gs->Zoom);
-    dc.Time = ps->TimeTracking.TotalSeconds;
-    dc.ShowBounds = io.KeyCtrl;
+    DrawContext dc = NewDrawContext(ps, gs);
+    dc.BeginFrame();
 
     // Input priority is ImGui -> UI -> game, arbitrated purely by emission order: the UI goes first
-    // and may claim the mouse, the world goes after and sees the verdict. That is the reverse of the
-    // z-order we want, so the two paint into separate channels of one draw list — channel 0 (world)
-    // merges under channel 1 (UI), and both stay under ImGui's windows, which is where the debug
-    // panel belongs.
-    draw_list->ChannelsSplit(2);
+    // and may claim the mouse, the world goes after and sees the verdict. That is the reverse of
+    // the z-order we want, so the two paint into separate channels of one draw list — channel 0
+    // (world) merges under channel 1 (UI), and both stay under ImGui's windows, which is where the
+    // debug panel belongs.
 
-    draw_list->ChannelsSetCurrent(1);
-    UILayer ui = UILayer::New(ps, draw_list);
-    DrawGameUI(&ui);
+    dc.EnableUIChannel();
+    DrawGameUI(&dc);
 
-    draw_list->ChannelsSetCurrent(0);
-    std::optional<Hex> hovered = DrawHexGrid(&dc, &ui, &world);
+    dc.EnableGameplayChannel();
+    std::optional<Hex> hovered = DrawHexGrid(&dc, &world);
 
-    draw_list->ChannelsMerge();
+    dc.EndFrame();
 
-    // The game is the lowest tier, so it decides last: |hovered| is already empty if ImGui or the UI
-    // claimed the mouse this frame.
+    // The game is the lowest tier, so it decides last: |hovered| is already empty if ImGui or the
+    // UI claimed the mouse this frame.
     //
     // TODO(arch): this is gameplay running inside the render pass — ApplyEditorOp and TryBuyTower
     // mutate the world from GameRender, so a click lands at draw time instead of in GameUpdate, and
@@ -1528,14 +1515,14 @@ void GameRender(PlatformState* ps, GameState* gs) {
     // command that GameUpdate drains next tick. Deferred: the command shape wants designing on its
     // own, and it is orthogonal to the input tiering above.
     bool clicked = hovered.has_value();
-    clicked &= ui.MousePressed;
+    clicked &= dc.UI.MousePressed;
     if (clicked) {
         switch (gs->Phase) {
             case EGamePhase::PreGame: {
                 ApplyEditorOp(gs, *hovered);
                 break;
             }
-            case EGamePhase::Build: {
+            case EGamePhase::Prepare: {
                 TryBuyTower(&world, &gs->Registry, *hovered);
                 break;
             }

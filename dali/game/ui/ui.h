@@ -3,12 +3,15 @@
 #include <dali/core/color.h>
 #include <dali/core/defines.h>
 #include <dali/core/math.h>
+#include <dali/game/hex.h>
 
 #include <imgui.h>
 
 namespace kdk {
 
 struct PlatformState;
+struct DrawContext;
+struct AssetRegistry;
 
 // The game's UI layer: a tier that traps the mouse the same way ImGui does, sitting between it and
 // the game. Priority is ImGui -> UI -> game, arbitrated by execution order rather than by ids or
@@ -57,9 +60,7 @@ struct UILayer {
     // last.
     bool MouseCaptured = false;
 
-    ImDrawList* _DrawList = nullptr;
-
-    static UILayer New(PlatformState* ps, ImDrawList* draw_list);
+    static UILayer New(PlatformState* ps);
 };
 
 // A square button, painted per EUIButtonState. Returns true on the frame a press lands inside it.
@@ -72,6 +73,39 @@ struct UILayer {
 //
 // Clicks fire on press, not on release-over-the-widget, so there is no drag-off-to-cancel. Fine for
 // a build palette; revisit before anything destructive hangs off one.
-bool UIButton(UILayer* ui, Vec2 pos, Vec2 size, const UIButtonStyle& style = {});
+bool UIButton(DrawContext* dc, Vec2 pos, Vec2 size, const UIButtonStyle& style = {});
+
+// The frame's shared draw state: one draw list, one origin/zoom, for everything that paints the
+// world. Built once in GameRender and passed down, so no draw path re-derives the transform and
+// picking can invert exactly what rendering used.
+//
+// TODO(cdc): This *SHOULD NOT* be here, this is more of "lower-level" rendering thing.
+//			  For now it is fine.
+struct DrawContext {
+    // for live-resolving asset references at draw
+    AssetRegistry* Registry = nullptr;
+    ImDrawList* DrawList = nullptr;
+    UILayer UI = {};
+
+    Vec2 Origin = {};
+    float Zoom = 1;
+    float Time = 0;
+    // While Control is held, outline each enemy/tower sprite quad so its bounds are visible.
+    bool ShowBounds = false;
+
+    void BeginFrame() { DrawList->ChannelsSplit(2); }
+    void EnableUIChannel() { DrawList->ChannelsSetCurrent(1); }
+    void EnableGameplayChannel() { DrawList->ChannelsSetCurrent(0); }
+    void EndFrame() { DrawList->ChannelsMerge(); }
+
+    ImVec2 WorldToScreen(const Vec2& p) const {
+        return ImVec2(Origin.x + p.x * Zoom, Origin.y + p.y * Zoom);
+    }
+
+    // A tile-center in screen space. Shared by the grid pass and the path spine so they line up.
+    ImVec2 TileCenter(const Hex& hex) const {
+        return WorldToScreen(Hex::HexToWorld(kHexSize, hex));
+    }
+};
 
 }  // namespace kdk

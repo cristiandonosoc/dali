@@ -4,6 +4,11 @@
 #include <dali/core/math.h>
 
 namespace kdk {
+// Hex center-to-corner distance in WORLD units. The sim runs entirely in world units (enemy
+// movement, ranges, spawn placement); the renderer converts to pixels as world * zoom. At zoom 1 a
+// world unit is one pixel.
+constexpr float kHexSize = 60.0f;
+
 
 // Our hex representation is using Axial coordinates:
 // https://www.redblobgames.com/grids/hexagons/#coordinates
