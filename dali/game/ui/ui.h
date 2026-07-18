@@ -75,6 +75,14 @@ struct UILayer {
 // a build palette; revisit before anything destructive hangs off one.
 bool UIButton(DrawContext* dc, Vec2 pos, Vec2 size, const UIButtonStyle& style = {});
 
+// Text primitive: draws |text| with its top-left at |pos|, painted straight into the draw list like
+// UIButton. |scale| multiplies ImGui's current font size (1.0 = default; >1 for headline text). No
+// wrapping, no clipping — the caller places it.
+void UIText(DrawContext* dc, Vec2 pos, const char* text, Color32 color, float scale = 1.0f);
+
+// The pixel size |text| occupies at |scale|. Use it to center or right-align before calling UIText.
+Vec2 UITextSize(const char* text, float scale = 1.0f);
+
 // The frame's shared draw state: one draw list, one origin/zoom, for everything that paints the
 // world. Built once in GameRender and passed down, so no draw path re-derives the transform and
 // picking can invert exactly what rendering used.
@@ -86,6 +94,7 @@ struct DrawContext {
     AssetRegistry* Registry = nullptr;
     ImDrawList* DrawList = nullptr;
     UILayer UI = {};
+	ImGuiIO* IO = nullptr;
 
     Vec2 Origin = {};
     float Zoom = 1;

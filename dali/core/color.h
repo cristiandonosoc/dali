@@ -19,7 +19,7 @@ struct Color32 {
         u32 Bits;
     };
 
-    static Color32 FromRGBA(u8 r, u8 g, u8 b, u8 a) {
+    static constexpr Color32 FromRGBA(u8 r, u8 g, u8 b, u8 a) {
         return Color32{.R = r, .G = g, .B = b, .A = a};
     }
 

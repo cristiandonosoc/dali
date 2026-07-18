@@ -62,4 +62,15 @@ bool UIButton(DrawContext* dc, Vec2 pos, Vec2 size, const UIButtonStyle& style) 
     return clicked;
 }
 
+void UIText(DrawContext* dc, Vec2 pos, const char* text, Color32 color, float scale) {
+    ImFont* font = ImGui::GetFont();
+    float font_size = ImGui::GetFontSize() * scale;
+    dc->DrawList->AddText(font, font_size, ImVec2(pos.x, pos.y), color.Bits, text);
+}
+
+Vec2 UITextSize(const char* text, float scale) {
+    ImVec2 size = ImGui::CalcTextSize(text);
+    return Vec2(size.x * scale, size.y * scale);
+}
+
 }  // namespace kdk

@@ -89,8 +89,9 @@ constexpr Array<Hex, TileChunk::kTileCount> kSlotToHex = MakeSlotToHex();
 constexpr Array<i32, TileChunk::kWidth * TileChunk::kWidth> kHexToSlot = MakeHexToSlot();
 
 DrawContext NewDrawContext(PlatformState* ps, GameState* gs) {
-    ImGuiIO& io = ImGui::GetIO();
-    Vec2 origin = {io.DisplaySize.x * 0.5f + gs->Camera.x, io.DisplaySize.y * 0.5f + gs->Camera.y};
+    ImGuiIO* io = &ImGui::GetIO();
+    Vec2 origin = {io->DisplaySize.x * 0.5f + gs->Camera.x,
+                   io->DisplaySize.y * 0.5f + gs->Camera.y};
 
     ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
 
@@ -98,10 +99,11 @@ DrawContext NewDrawContext(PlatformState* ps, GameState* gs) {
         .Registry = &gs->Registry,
         .DrawList = draw_list,
         .UI = UILayer::New(ps),
+        .IO = io,
         .Origin = origin,
         .Zoom = gs->Zoom,
         .Time = (float)ps->TimeTracking.TotalSeconds,
-        .ShowBounds = io.KeyCtrl,
+        .ShowBounds = io->KeyCtrl,
     };
 
     return dc;
@@ -234,15 +236,17 @@ void DrawEnemy(DrawContext* dc, const Enemy& enemy) {
     }
 }
 
-void DrawTower(DrawContext* dc, const Tile& tile, const Tower& tower) {
-    ImVec2 center = dc->TileCenter(tile.Hex);
-    // The tower's idle animation, from the blueprint it snapshotted at placement (resolved live, so
-    // editing the sheet shows up immediately). Falls back to a placeholder disc when no clip
-    // resolves, so an art-less tower is still visible.
-    const SpriteSheetClip* clip = tower.Data.IdleClip.Resolve(*dc->Registry);
+// Draws a tower's idle clip centered on |center|, multiplied by |tint| — opaque white for a placed
+// tower, an alpha < 255 for a translucent build-preview ghost. Resolved live so sheet edits show
+// immediately; falls back to a placeholder disc (kept at |tint|'s alpha) when no clip resolves, so
+// an art-less tower is still visible.
+void DrawTowerSprite(DrawContext* dc,
+                     const ImVec2& center,
+                     const SpriteSheetClipReference& idle,
+                     Color32 tint) {
+    const SpriteSheetClip* clip = idle.Resolve(*dc->Registry);
 
     i32 pos = NONE;
-
     bool drawable = clip != nullptr;
     if (drawable) {
         drawable &= clip->_Resolved != nullptr;
@@ -252,37 +256,48 @@ void DrawTower(DrawContext* dc, const Tile& tile, const Tower& tower) {
         drawable &= pos != NONE;
         drawable &= pos < clip->_Frames.Size;
     }
-    if (drawable) {
-        FrameUv frameuv = clip->_Frames[pos];
-        ImVec2 uv0 = ToImVec2(frameuv.Uv0);
-        ImVec2 uv1 = ToImVec2(frameuv.Uv1);
-        if (tower.Data.IdleClip.FlipX) {
-            // Swapping the U bounds mirrors horizontally (ImGui samples min.u -> max.u).
-            float u = uv0.x;
-            uv0.x = uv1.x;
-            uv1.x = u;
-        }
-        // The clip's pivot lands on the tile center: shift the centered quad by the pivot offset.
-        Vec2 draw_size = clip->_CellSize * dc->Zoom;
-        ImVec2 hsize = ToImVec2(draw_size / 2.0f);
-        ImVec2 off = ToImVec2(clip->PivotOffset(draw_size));
-        ImVec2 pmin(center.x - hsize.x + off.x, center.y - hsize.y + off.y);
-        ImVec2 pmax(center.x + hsize.x + off.x, center.y + hsize.y + off.y);
-        dc->DrawList->AddImage((ImTextureID)clip->_Handle, pmin, pmax, uv0, uv1);
-        if (dc->ShowBounds) {
-            dc->DrawList->AddRect(pmin, pmax, Color32::Green.Bits, 0.0f, 0, 1.5f);
-            DrawPivotMarker(dc, center);
-        }
-    } else {
-        dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, Color32::SteelBlue.Bits);
-        dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, Color32::White.Bits, 0, 2.0f);
+
+    if (!drawable) {
+        Color32 disc = Color32::SteelBlue;
+        disc.A = tint.A;
+        Color32 outline = Color32::White;
+        outline.A = tint.A;
+        dc->DrawList->AddCircleFilled(center, 10.0f * dc->Zoom, disc.Bits);
+        dc->DrawList->AddCircle(center, 10.0f * dc->Zoom, outline.Bits, 0, 2.0f);
         if (dc->ShowBounds) {
             ImVec2 hsize(10.0f * dc->Zoom, 10.0f * dc->Zoom);
             dc->DrawList
                 ->AddRect(center - hsize, center + hsize, Color32::Green.Bits, 0.0f, 0, 1.5f);
             DrawPivotMarker(dc, center);
         }
+        return;
     }
+
+    FrameUv frameuv = clip->_Frames[pos];
+    ImVec2 uv0 = ToImVec2(frameuv.Uv0);
+    ImVec2 uv1 = ToImVec2(frameuv.Uv1);
+    if (idle.FlipX) {
+        // Swapping the U bounds mirrors horizontally (ImGui samples min.u -> max.u).
+        float u = uv0.x;
+        uv0.x = uv1.x;
+        uv1.x = u;
+    }
+    // The clip's pivot lands on the tile center: shift the centered quad by the pivot offset.
+    Vec2 draw_size = clip->_CellSize * dc->Zoom;
+    ImVec2 hsize = ToImVec2(draw_size / 2.0f);
+    ImVec2 off = ToImVec2(clip->PivotOffset(draw_size));
+    ImVec2 pmin(center.x - hsize.x + off.x, center.y - hsize.y + off.y);
+    ImVec2 pmax(center.x + hsize.x + off.x, center.y + hsize.y + off.y);
+    dc->DrawList->AddImage((ImTextureID)clip->_Handle, pmin, pmax, uv0, uv1, tint.Bits);
+    if (dc->ShowBounds) {
+        dc->DrawList->AddRect(pmin, pmax, Color32::Green.Bits, 0.0f, 0, 1.5f);
+        DrawPivotMarker(dc, center);
+    }
+}
+
+void DrawTower(DrawContext* dc, const Tile& tile, const Tower& tower) {
+    ImVec2 center = dc->TileCenter(tile.Hex);
+    DrawTowerSprite(dc, center, tower.Data.IdleClip, Color32::White);
 
     // Seconds until this tower can fire again (0.00 = ready), so cooldown behavior is
     // visible at a glance.
@@ -1176,24 +1191,68 @@ void ApplyEditorOp(GameState* gs, Hex hex) {
 }
 
 // Build-phase interaction: buy a tower on an empty, non-path tile if the player can afford it. The
-// price is the blueprint's, so it is whatever the tower being placed costs.
-void TryBuyTower(World* world, AssetRegistry* registry, Hex hex) {
+// price is the blueprint's, so it is whatever the tower being placed costs. Returns true only when a
+// tower was actually placed, so the caller can leave placing mode on success and stay in it on a
+// missed/invalid/too-expensive click.
+bool TryBuyTower(World* world, AssetRegistry* registry, Hex hex) {
     Tile* tile = world->Grid.FindTile(hex);
     if (!tile) {
-        return;
+        return false;
     }
     if (tile->IsPath) {
-        return;
+        return false;
     }
     if (tile->Content != ETileContent::None) {
-        return;
+        return false;
     }
     TowerAsset blueprint = ResolveSelectedTower(*world, registry);
     if (world->Gold < blueprint.PerInstanceData.Cost) {
-        return;
+        return false;
     }
     world->Gold -= blueprint.PerInstanceData.Cost;
     MakeTower(tile, blueprint);
+    return true;
+}
+
+// While building, ghost the selected tower on the hovered tile so its footprint and firing range
+// are visible before committing. Shows only on a placeable tile (empty, non-path); the ghost and
+// range ring turn red when the tower is unaffordable. Drawn in the gameplay channel, so it sits
+// with the world and under the UI. Mirrors TryBuyTower's placeability rules — keep them in step.
+void DrawBuildPreview(DrawContext* dc, GameState* gs, const std::optional<Hex>& hovered) {
+    if (!gs->PlacingTower) {
+        return;
+    }
+    if (!hovered.has_value()) {
+        return;
+    }
+
+    World& world = gs->World;
+    Tile* tile = world.Grid.FindTile(*hovered);
+
+    bool placeable = tile != nullptr;
+    if (placeable) {
+        placeable &= !tile->IsPath;
+    }
+    if (placeable) {
+        placeable &= tile->Content == ETileContent::None;
+    }
+    if (!placeable) {
+        return;
+    }
+
+    TowerAsset blueprint = ResolveSelectedTower(world, &gs->Registry);
+    bool affordable = world.Gold >= blueprint.PerInstanceData.Cost;
+
+    Color32 tint = Color32::FromRGBA(255, 255, 255, 150);
+    Color32 ring = Color32::FromRGBA(120, 220, 120, 150);
+    if (!affordable) {
+        tint = Color32::FromRGBA(230, 90, 90, 150);
+        ring = Color32::FromRGBA(230, 90, 90, 150);
+    }
+
+    ImVec2 center = dc->TileCenter(*hovered);
+    dc->DrawList->AddCircle(center, blueprint.PerInstanceData.Range * dc->Zoom, ring.Bits, 0, 2.0f);
+    DrawTowerSprite(dc, center, blueprint.PerInstanceData.IdleClip, tint);
 }
 
 // Rebuilds + restages the game DLL by running reload.bat (which the running platform notices and
@@ -1332,25 +1391,145 @@ void DrawAssetsMode(GameState* gs, float menu_bar_height) {
     ImGui::End();
 }
 
-// Placeholder game UI: a centered row of squares along the bottom edge. Here to exercise the input
-// tiering — hovering one suppresses the grid highlight underneath and swallows the click — before
-// the real tower palette (icons, cost, selection) lands on top of it.
-void DrawGameUI(DrawContext* dc) {
-    constexpr i32 kButtonCount = 4;
-    constexpr float kButtonSize = 64.0f;
-    constexpr float kSpacing = 12.0f;
-    constexpr float kBottomMargin = 24.0f;
+// Placeholder in-game UI, one panel per phase. Everything is a flat labeled square drawn straight
+// into the UI channel — no icons, no layout system — just enough to drive the phase flow from the
+// viewport. The real tower palette (icons, cost, selection) replaces this later.
 
-    ImGuiIO& io = ImGui::GetIO();
-    float row_width = kButtonCount * kButtonSize + (kButtonCount - 1) * kSpacing;
-    float x = (io.DisplaySize.x - row_width) * 0.5f;
-    float y = io.DisplaySize.y - kBottomMargin - kButtonSize;
+constexpr float kUIButtonWidth = 180.0f;
+constexpr float kUIButtonHeight = 52.0f;
+constexpr float kUIButtonSpacing = 16.0f;
+constexpr float kUIBottomMargin = 28.0f;
+constexpr float kUIEdgeMargin = 24.0f;  // gap from the right/top screen edges for the HUD
+constexpr float kUITopMargin = 40.0f;   // clears the main menu bar
+constexpr float kUILineSpacing = 6.0f;
+constexpr float kUIHudScale = 1.6f;  // headline text (gold), bigger than the body labels
+constexpr Color32 kUILabelColor = Color32::FromRGBA(230, 232, 238, 255);
+constexpr Color32 kUIGoldColor = Color32::FromRGBA(255, 214, 110, 255);
 
-    for (i32 i = 0; i < kButtonCount; ++i) {
-        if (UIButton(dc, Vec2(x, y), Vec2(kButtonSize, kButtonSize))) {
-            printf("[game] UI button %d clicked\n", i);
+// Text centered on a screen point, built on the UI text primitive.
+void UILabel(DrawContext* dc, Vec2 center, const char* text, Color32 color, float scale = 1.0f) {
+    Vec2 size = UITextSize(text, scale);
+    Vec2 pos(center.x - size.x * 0.5f, center.y - size.y * 0.5f);
+    UIText(dc, pos, text, color, scale);
+}
+
+// Draws |text| right-aligned to |right| with its top at |y|, and returns the y below the line, so
+// callers can stack lines down from a corner.
+float UIRightLine(DrawContext* dc, float right, float y, const char* text, Color32 color, float scale) {
+    Vec2 size = UITextSize(text, scale);
+    UIText(dc, Vec2(right - size.x, y), text, color, scale);
+    return y + size.y;
+}
+
+// A UIButton with a centered label. Returns true on the frame a press lands inside it.
+bool UITextButton(DrawContext* dc, Vec2 pos, Vec2 size, const char* label) {
+    bool clicked = UIButton(dc, pos, size);
+    Vec2 center(pos.x + size.x * 0.5f, pos.y + size.y * 0.5f);
+    UILabel(dc, center, label, kUILabelColor);
+    return clicked;
+}
+
+// Top-left of a button of |size| centered along the bottom edge.
+Vec2 BottomCenteredSlot(DrawContext* dc, Vec2 size) {
+    float x = dc->IO->DisplaySize.x * 0.5f - size.x * 0.5f;
+    float y = dc->IO->DisplaySize.y - kUIBottomMargin - size.y;
+    return Vec2(x, y);
+}
+
+// Player-facing HUD pinned to the top-right: gold always, plus live wave stats while a wave runs.
+// Lines stack downward from the top edge.
+void DrawPlayerHUD(DrawContext* dc, GameState* gs) {
+    const World& world = gs->World;
+    float right = dc->IO->DisplaySize.x - kUIEdgeMargin;
+    float y = kUITopMargin;
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Gold: %d", world.Gold);
+    y = UIRightLine(dc, right, y, buf, kUIGoldColor, kUIHudScale);
+
+    if (gs->Phase != EGamePhase::Wave) {
+        return;
+    }
+    y += kUILineSpacing;
+
+    snprintf(buf, sizeof(buf), "Wave %d", world.Wave.Number);
+    y = UIRightLine(dc, right, y, buf, kUILabelColor, 1.0f);
+    snprintf(buf, sizeof(buf), "To spawn: %d", world.Wave.ToSpawn);
+    y = UIRightLine(dc, right, y, buf, kUILabelColor, 1.0f);
+    snprintf(buf, sizeof(buf), "Alive: %d", world.Enemies.Size);
+    y = UIRightLine(dc, right, y, buf, kUILabelColor, 1.0f);
+    snprintf(buf, sizeof(buf), "Base: %.0f / %.0f", world.BaseHealth, World::kMaxBaseHealth);
+    UIRightLine(dc, right, y, buf, kUILabelColor, 1.0f);
+}
+
+// PreGame: a single "New Game" that locks in the terrain and starts the run — the same transition
+// the debug panel's "Start Game" does, and only if there's a goal and somewhere to spawn from.
+void DrawPreGameUI(DrawContext* dc, GameState* gs) {
+    Vec2 size(kUIButtonWidth, kUIButtonHeight);
+    Vec2 pos = BottomCenteredSlot(dc, size);
+    if (UITextButton(dc, pos, size, "New Game")) {
+        World& world = gs->World;
+        world.CalculatePath();
+        world.CollectSpawnSources();
+        bool can_start = world.Goal.has_value();
+        can_start &= !world.SpawnSources.IsEmpty();
+        if (can_start) {
+            world.BeginRun();
+            gs->Phase = EGamePhase::Prepare;
         }
-        x += kButtonSize + kSpacing;
+    }
+}
+
+// Prepare: pick the tower to build (one for now — the world stamps World::SelectedTower on the next
+// tile click via TryBuyTower), then Start Wave to send it. Two buttons centered as a row.
+void DrawPrepareUI(DrawContext* dc, GameState* gs) {
+    World& world = gs->World;
+    Vec2 size(kUIButtonWidth, kUIButtonHeight);
+    float row_width = size.x * 2.0f + kUIButtonSpacing;
+    float left = dc->IO->DisplaySize.x * 0.5f - row_width * 0.5f;
+    float y = dc->IO->DisplaySize.y - kUIBottomMargin - size.y;
+
+    if (UITextButton(dc, Vec2(left, y), size, "Build Arrow")) {
+        world.SelectedTower = AssetId::Normalize("towers/arrow"sv);
+        gs->PlacingTower = true;
+    }
+    float wave_x = left + size.x + kUIButtonSpacing;
+    if (UITextButton(dc, Vec2(wave_x, y), size, "Start Wave")) {
+        world.ArmNextWave();
+        gs->PlacingTower = false;
+        gs->Phase = EGamePhase::Wave;
+    }
+
+    DrawPlayerHUD(dc, gs);
+}
+
+// Wave: no controls — the wave plays out on its own. Gold and wave stats live in the top-right HUD.
+void DrawWaveUI(DrawContext* dc, GameState* gs) {
+    DrawPlayerHUD(dc, gs);
+}
+
+// GameOver: the run's result and a single "Replay" back to PreGame.
+void DrawGameOverUI(DrawContext* dc, GameState* gs) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Game Over - survived %d waves", gs->World.Wave.Number);
+    Vec2 label_center(dc->IO->DisplaySize.x * 0.5f, dc->IO->DisplaySize.y * 0.5f - 40.0f);
+    UILabel(dc, label_center, buf, Color32::FromRGBA(235, 210, 210, 255));
+
+    Vec2 size(kUIButtonWidth, kUIButtonHeight);
+    Vec2 pos = BottomCenteredSlot(dc, size);
+    if (UITextButton(dc, pos, size, "Replay")) {
+        gs->Phase = EGamePhase::PreGame;
+    }
+}
+
+// The in-game UI: whatever the current phase needs, drawn into the UI channel and arbitrated above
+// the world (see GameRender). Each phase owns its panel; this just dispatches.
+void DrawGameUI(DrawContext* dc, GameState* gs) {
+    switch (gs->Phase) {
+        case EGamePhase::PreGame: DrawPreGameUI(dc, gs); break;
+        case EGamePhase::Prepare: DrawPrepareUI(dc, gs); break;
+        case EGamePhase::Wave: DrawWaveUI(dc, gs); break;
+        case EGamePhase::GameOver: DrawGameOverUI(dc, gs); break;
     }
 }
 
@@ -1499,10 +1678,11 @@ void GameRender(PlatformState* ps, GameState* gs) {
     // debug panel belongs.
 
     dc.EnableUIChannel();
-    DrawGameUI(&dc);
+    DrawGameUI(&dc, gs);
 
     dc.EnableGameplayChannel();
     std::optional<Hex> hovered = DrawHexGrid(&dc, &world);
+    DrawBuildPreview(&dc, gs, hovered);
 
     dc.EndFrame();
 
@@ -1514,6 +1694,11 @@ void GameRender(PlatformState* ps, GameState* gs) {
     // rendering is no longer a pure read of the world. The intended shape is for input to queue a
     // command that GameUpdate drains next tick. Deferred: the command shape wants designing on its
     // own, and it is orthogonal to the input tiering above.
+    // Right-click backs out of tower placement, the same exit placing one gives.
+    if (ps->Input.IsMousePressed(EMouseButton::Right)) {
+        gs->PlacingTower = false;
+    }
+
     bool clicked = hovered.has_value();
     clicked &= dc.UI.MousePressed;
     if (clicked) {
@@ -1523,7 +1708,14 @@ void GameRender(PlatformState* ps, GameState* gs) {
                 break;
             }
             case EGamePhase::Prepare: {
-                TryBuyTower(&world, &gs->Registry, *hovered);
+                // Placement is armed by the build button; a successful placement disarms it, so one
+                // click builds one tower and re-arming is deliberate.
+                if (gs->PlacingTower) {
+                    bool placed = TryBuyTower(&world, &gs->Registry, *hovered);
+                    if (placed) {
+                        gs->PlacingTower = false;
+                    }
+                }
                 break;
             }
             case EGamePhase::Wave:

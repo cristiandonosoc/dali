@@ -270,6 +270,11 @@ struct GameState {
     EGamePhase Phase = EGamePhase::PreGame;
     EOperationMode CurrentOperation = EOperationMode::TogglePath;
 
+    // Prepare-phase build intent: true once a tower is armed for placement (the build button), so
+    // the ghost preview shows and a tile click places. Placing one clears it (one tower per arm), as
+    // does a right-click cancel — you re-arm from the build button for the next.
+    bool PlacingTower = false;
+
     // Screen-space camera pan (WASD). Added to the world's draw origin, so it offsets both what is
     // rendered and where clicks land.
     bool InverseCameraMovement = false;
